@@ -7,11 +7,13 @@ REPORTS_DIR="$HOME/Downloads"
 ENV_FILE="$ROOT_DIR/.env"
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: ./research.sh [--ru|--en] \"topic\""
+  echo "Usage: ./research.sh [--ru|--en] [--file /path/context.md | \"topic\"]"
   exit 1
 fi
 
 TRANSLATE_TO_RU=1
+FILE_MODE=0
+INPUT_FILE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --ru)
@@ -21,6 +23,15 @@ while [[ $# -gt 0 ]]; do
     --en)
       TRANSLATE_TO_RU=0
       shift
+      ;;
+    --file)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --file requires a path"
+        exit 1
+      fi
+      FILE_MODE=1
+      INPUT_FILE="$2"
+      shift 2
       ;;
     --)
       shift
@@ -36,12 +47,29 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ $# -lt 1 ]]; then
-  echo "Usage: ./research.sh [--ru|--en] \"topic\""
+if [[ "$FILE_MODE" -eq 0 && $# -lt 1 ]]; then
+  echo "Usage: ./research.sh [--ru|--en] [--file /path/context.md | \"topic\"]"
   exit 1
 fi
 
 QUERY="$*"
+FILE_TASK="$QUERY"
+REPORT_SOURCE="web"
+TEMP_DOC_DIR=""
+
+if [[ "$FILE_MODE" -eq 1 ]]; then
+  if [[ ! -f "$INPUT_FILE" ]]; then
+    echo "Error: input file not found: $INPUT_FILE"
+    exit 1
+  fi
+  INPUT_FILE="$(python3 - "$INPUT_FILE" <<'PY'
+from pathlib import Path
+import sys
+print(Path(sys.argv[1]).expanduser().resolve())
+PY
+)"
+  REPORT_SOURCE="hybrid"
+fi
 
 if [[ ! -d "$APP_DIR" || ! -f "$APP_DIR/cli.py" ]]; then
   echo "Error: GPT Researcher not found at $APP_DIR"
@@ -165,7 +193,67 @@ echo "Bedrock check passed for model: $BEDROCK_MODEL_ID"
 
 mkdir -p "$REPORTS_DIR"
 
-RAW_OUTPUT="$(cd "$APP_DIR" && python cli.py "$QUERY" --report_type research_report --report_source web --no-pdf --no-docx 2>&1)" || {
+if [[ "$FILE_MODE" -eq 1 ]]; then
+  TEMP_DOC_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gpt-research-docs.XXXXXX")"
+  trap '[[ -n "${TEMP_DOC_DIR:-}" && -d "$TEMP_DOC_DIR" ]] && rm -rf "$TEMP_DOC_DIR"' EXIT
+  cp "$INPUT_FILE" "$TEMP_DOC_DIR/"
+  export DOC_PATH="$TEMP_DOC_DIR"
+  export INPUT_FILE
+  export FILE_TASK
+
+  echo "Preparing hybrid research query from: $INPUT_FILE"
+  QUERY="$(python - <<'PY'
+import os
+from pathlib import Path
+import boto3
+
+region = os.getenv("AWS_DEFAULT_REGION") or os.getenv("AWS_REGION")
+model_id = os.getenv("SMART_LLM", "")
+if model_id.startswith("bedrock:"):
+    model_id = model_id.split(":", 1)[1]
+
+source = Path(os.environ["INPUT_FILE"])
+content = source.read_text(encoding="utf-8", errors="replace")
+file_task = os.getenv("FILE_TASK", "").strip()
+
+prompt = f"""
+Create a concise English research query for GPT Researcher based on this markdown brief.
+
+The query must:
+- state the research goal clearly;
+- keep the original business context;
+- ask for web validation, current sources, vendors, examples, ROI evidence, and limitations;
+- include no more than 5 focused research questions;
+- be self-contained;
+- be under 1800 words;
+- not translate proper nouns or technical terms unnecessarily.
+
+Return only the final research query, no commentary.
+
+Additional user instruction:
+{file_task or "Use the markdown brief itself as the research task."}
+
+Markdown brief:
+{content}
+"""
+
+client = boto3.client("bedrock-runtime", region_name=region)
+resp = client.converse(
+    modelId=model_id,
+    messages=[{"role": "user", "content": [{"text": prompt}]}],
+    inferenceConfig={"maxTokens": 1800, "temperature": 0},
+)
+print(resp["output"]["message"]["content"][0]["text"].strip())
+PY
+)"
+  if [[ -z "$QUERY" ]]; then
+    echo "Error: generated research query is empty"
+    exit 1
+  fi
+  echo "Hybrid DOC_PATH: $DOC_PATH"
+fi
+
+RAW_OUTPUT="$(cd "$APP_DIR" && python cli.py "$QUERY" --report_type research_report --report_source "$REPORT_SOURCE" --no-pdf --no-docx 2>&1)" || {
   echo "$RAW_OUTPUT"
   echo "Error: GPT Researcher execution failed"
   exit 1
@@ -197,12 +285,27 @@ PY
 
 DATE_STR="$(date +%F)"
 BASE_REPORT_PATH="$REPORTS_DIR/${DATE_STR}-${SLUG}"
+if [[ "$FILE_MODE" -eq 1 ]]; then
+  FILE_STEM="$(basename "$INPUT_FILE")"
+  FILE_STEM="${FILE_STEM%.*}"
+  SLUG="$(python - "$FILE_STEM" <<'PY'
+import re
+import sys
+q = sys.argv[1].strip().lower()
+slug = re.sub(r"[^\w]+", "-", q, flags=re.UNICODE).strip("-_")
+print((slug[:80] or "topic"))
+PY
+)"
+  BASE_REPORT_PATH="$REPORTS_DIR/${DATE_STR}-${SLUG}"
+fi
 
 if [[ "$TRANSLATE_TO_RU" -eq 1 ]]; then
-  DEST_REPORT="${BASE_REPORT_PATH}-ru.md"
+  DEST_REPORT="${BASE_REPORT_PATH}.md"
   export SRC_REPORT DEST_REPORT
   python - <<'PY'
 import os
+import re
+import time
 from pathlib import Path
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
@@ -216,22 +319,71 @@ src = Path(os.environ["SRC_REPORT"])
 dst = Path(os.environ["DEST_REPORT"])
 content = src.read_text(encoding="utf-8")
 
-prompt = (
-    "Translate the following markdown report to Russian. "
-    "Keep markdown structure, headings, links, citations, and formatting unchanged. "
-    "Preserve technical terms, product names, framework names, code identifiers, and model names in original form unless natural Russian spelling is standard. "
-    "Do not add comments or extra sections.\n\n"
-    + content
-)
+def split_markdown(text: str, max_chars: int = 6500) -> list[str]:
+    sections = re.split(r"(?m)(?=^#{1,3}\s+)", text)
+    chunks = []
+    current = ""
+    for section in sections:
+        if not section.strip():
+            continue
+        if current and len(current) + len(section) > max_chars:
+            chunks.append(current.rstrip())
+            current = section
+        else:
+            current += section
+    if current.strip():
+        chunks.append(current.rstrip())
+
+    compact_chunks = []
+    for chunk in chunks:
+        if len(chunk) <= max_chars:
+            compact_chunks.append(chunk)
+            continue
+        paragraphs = re.split(r"\n\s*\n", chunk)
+        current = ""
+        for paragraph in paragraphs:
+            candidate = f"{current}\n\n{paragraph}" if current else paragraph
+            if current and len(candidate) > max_chars:
+                compact_chunks.append(current.rstrip())
+                current = paragraph
+            else:
+                current = candidate
+        if current.strip():
+            compact_chunks.append(current.rstrip())
+    return compact_chunks
+
+def translate_chunk(client, chunk: str, index: int, total: int) -> str:
+    prompt = (
+        "Translate this markdown report section to Russian. "
+        "Keep markdown structure, headings, links, citations, tables, and formatting unchanged. "
+        "Preserve technical terms, product names, framework names, code identifiers, model names, URLs, and source titles in original form unless natural Russian spelling is standard. "
+        "Do not add comments, introductions, or extra sections. "
+        f"This is section {index} of {total}; translate only this section.\n\n"
+        + chunk
+    )
+    for attempt in range(1, 4):
+        try:
+            resp = client.converse(
+                modelId=model_id,
+                messages=[{"role": "user", "content": [{"text": prompt}]}],
+                inferenceConfig={"maxTokens": 5000, "temperature": 0},
+            )
+            return resp["output"]["message"]["content"][0]["text"].strip()
+        except (ClientError, BotoCoreError, Exception) as e:
+            if attempt == 3:
+                print(f"Warning: RU translation failed for section {index}/{total}: {e}")
+                return chunk
+            time.sleep(2 * attempt)
 
 try:
     client = boto3.client("bedrock-runtime", region_name=region)
-    resp = client.converse(
-        modelId=model_id,
-        messages=[{"role": "user", "content": [{"text": prompt}]}],
-        inferenceConfig={"maxTokens": 4000, "temperature": 0},
-    )
-    ru_text = resp["output"]["message"]["content"][0]["text"]
+    chunks = split_markdown(content)
+    print(f"Translating report to RU in {len(chunks)} section(s)...")
+    translated = []
+    for i, chunk in enumerate(chunks, start=1):
+        print(f"Translating section {i}/{len(chunks)}...")
+        translated.append(translate_chunk(client, chunk, i, len(chunks)))
+    ru_text = "\n\n".join(translated).strip() + "\n"
     dst.write_text(ru_text, encoding="utf-8")
     print(f"Saved report: {dst}")
 except (ClientError, BotoCoreError, Exception) as e:

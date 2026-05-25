@@ -29,6 +29,18 @@ You must set in `.env`:
 ./research.sh "Your topic here"
 ```
 
+Research from a markdown brief:
+
+```bash
+./research.sh --file "/Users/melanin/Downloads/context.md"
+```
+
+You can add a specific focus after the file:
+
+```bash
+./research.sh --file "/Users/melanin/Downloads/context.md" "focus on competitors and ROI"
+```
+
 English-only mode:
 
 ```bash
@@ -37,8 +49,14 @@ English-only mode:
 
 Output file format:
 
-- default: `~/Downloads/YYYY-MM-DD-topic-ru.md`
+- default: `~/Downloads/YYYY-MM-DD-topic.md`
 - with `--en`: `~/Downloads/YYYY-MM-DD-topic.md`
+
+For `--file`, the script uses GPT Researcher hybrid mode:
+
+- the markdown file is loaded as local context via `DOC_PATH`
+- Bedrock creates a concise research query from the file
+- Tavily/web search validates and expands the brief with external sources
 
 `research.sh` performs preflight checks:
 
