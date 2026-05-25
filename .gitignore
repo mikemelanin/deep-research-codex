@@ -1,0 +1,12 @@
+# secrets
+.env
+
+# local env
+.venv/
+
+# generated artifacts
+reports/
+*.log
+
+# upstream cloned app repo (managed separately)
+gpt-researcher/
