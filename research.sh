@@ -217,18 +217,20 @@ content = source.read_text(encoding="utf-8", errors="replace")
 file_task = os.getenv("FILE_TASK", "").strip()
 
 prompt = f"""
-Create a concise English research query for GPT Researcher based on this markdown brief.
+Create a short English web-research task for GPT Researcher based on this markdown brief.
 
-The query must:
-- state the research goal clearly;
-- keep the original business context;
-- ask for web validation, current sources, vendors, examples, ROI evidence, and limitations;
-- include no more than 5 focused research questions;
-- be self-contained;
-- be under 1800 words;
-- not translate proper nouns or technical terms unnecessarily.
+The task will be used as a web-search seed. The full markdown file is already loaded separately as local context via DOC_PATH, so do not restate the brief.
 
-Return only the final research query, no commentary.
+Rules:
+- 350 to 650 characters;
+- one compact paragraph;
+- mention the core topic, target market, and evidence types to find;
+- include key terms that should guide search query generation;
+- no markdown headings, bullets, lists, or commentary;
+- do not include detailed background or long question lists;
+- preserve proper nouns and technical terms.
+
+Return only the final web-research task.
 
 Additional user instruction:
 {file_task or "Use the markdown brief itself as the research task."}
@@ -241,9 +243,30 @@ client = boto3.client("bedrock-runtime", region_name=region)
 resp = client.converse(
     modelId=model_id,
     messages=[{"role": "user", "content": [{"text": prompt}]}],
-    inferenceConfig={"maxTokens": 1800, "temperature": 0},
+    inferenceConfig={"maxTokens": 350, "temperature": 0},
 )
-print(resp["output"]["message"]["content"][0]["text"].strip())
+query = resp["output"]["message"]["content"][0]["text"].strip()
+
+if len(query) > 800:
+    compress_prompt = (
+        "Compress this web-research task to 350-650 characters. "
+        "Keep core topic, market, evidence types, and search terms. "
+        "Return one compact paragraph only.\n\n"
+        + query
+    )
+    resp = client.converse(
+        modelId=model_id,
+        messages=[{"role": "user", "content": [{"text": compress_prompt}]}],
+        inferenceConfig={"maxTokens": 220, "temperature": 0},
+    )
+    query = resp["output"]["message"]["content"][0]["text"].strip()
+
+if len(query) > 750:
+    cut = query[:750]
+    last_period = max(cut.rfind("."), cut.rfind(";"))
+    query = cut[:last_period + 1] if last_period > 350 else cut.rstrip()
+
+print(query)
 PY
 )"
   if [[ -z "$QUERY" ]]; then
