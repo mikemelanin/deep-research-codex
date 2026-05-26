@@ -263,6 +263,11 @@ RUN_ID="$(date +%Y%m%d-%H%M%S)"
 RUN_LOG="$LOGS_DIR/${RUN_ID}-research.log"
 HYBRID_TIMEOUT_SECONDS="${HYBRID_TIMEOUT_SECONDS:-900}"
 WEB_TIMEOUT_SECONDS="${WEB_TIMEOUT_SECONDS:-480}"
+REPORT_TYPE="${REPORT_TYPE:-deep}"
+DEEP_RESEARCH_BREADTH="${DEEP_RESEARCH_BREADTH:-4}"
+DEEP_RESEARCH_DEPTH="${DEEP_RESEARCH_DEPTH:-2}"
+DEEP_RESEARCH_CONCURRENCY="${DEEP_RESEARCH_CONCURRENCY:-4}"
+export REPORT_TYPE DEEP_RESEARCH_BREADTH DEEP_RESEARCH_DEPTH DEEP_RESEARCH_CONCURRENCY
 
 log_ts() {
   printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" | tee -a "$RUN_LOG"
@@ -473,6 +478,10 @@ fi
   echo "input_file=${INPUT_FILE:-}"
   echo "doc_path=${DOC_PATH:-}"
   echo "query_chars=${#QUERY}"
+  echo "report_type=${REPORT_TYPE}"
+  echo "deep_research_breadth=${DEEP_RESEARCH_BREADTH}"
+  echo "deep_research_depth=${DEEP_RESEARCH_DEPTH}"
+  echo "deep_research_concurrency=${DEEP_RESEARCH_CONCURRENCY}"
   echo "query:"
   echo "$QUERY"
   echo
@@ -489,13 +498,14 @@ run_cli_with_timeout() {
   python - "$APP_DIR" "$QUERY" "$source" "$timeout_sec" "$RAW_OUTPUT_FILE" <<'PY'
 import subprocess
 import sys
+import os
 from pathlib import Path
 
 app_dir, query, source, timeout_sec, raw_file = sys.argv[1:]
 timeout_sec = int(timeout_sec)
 cmd = [
     sys.executable, "cli.py", query,
-    "--report_type", "research_report",
+    "--report_type", os.environ.get("REPORT_TYPE", "deep"),
     "--report_source", source,
     "--no-pdf", "--no-docx",
 ]
