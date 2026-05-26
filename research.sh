@@ -145,6 +145,20 @@ if [[ "$HAS_BEARER" -eq 0 && "$HAS_AWS_CREDS" -eq 0 ]]; then
   exit 1
 fi
 
+# Avoid mixed Bedrock auth modes in one process.
+# Default strategy: if static AWS credentials are present, use them and ignore bearer key.
+if [[ "$HAS_BEARER" -eq 1 && "$HAS_AWS_CREDS" -eq 1 ]]; then
+  if [[ "${BEDROCK_AUTH_MODE:-aws}" == "bearer" ]]; then
+    unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE
+    HAS_AWS_CREDS=0
+    echo "Both Bedrock auth modes are set; using bearer token (BEDROCK_AUTH_MODE=bearer)."
+  else
+    unset AWS_BEARER_TOKEN_BEDROCK
+    HAS_BEARER=0
+    echo "Both Bedrock auth modes are set; using AWS credentials (default)."
+  fi
+fi
+
 BEDROCK_MODEL_ID="${SMART_LLM#bedrock:}"
 
 python - <<'PY'
@@ -206,14 +220,61 @@ mkdir -p "$LOGS_DIR"
 if [[ "$FILE_MODE" -eq 1 ]]; then
   TEMP_DOC_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gpt-research-docs.XXXXXX")"
   trap '[[ -n "${TEMP_DOC_DIR:-}" && -d "$TEMP_DOC_DIR" ]] && rm -rf "$TEMP_DOC_DIR"' EXIT
-  cp "$INPUT_FILE" "$TEMP_DOC_DIR/"
-  export DOC_PATH="$TEMP_DOC_DIR"
   export INPUT_FILE
+  export TEMP_DOC_DIR
+  export HYBRID_DOC_MAX_CHARS="${HYBRID_DOC_MAX_CHARS:-45000}"
+  python - <<'PY'
+import os
+import re
+from pathlib import Path
+
+source = Path(os.environ["INPUT_FILE"])
+target_dir = Path(os.environ["TEMP_DOC_DIR"])
+max_chars = int(os.getenv("HYBRID_DOC_MAX_CHARS", "45000"))
+
+text = source.read_text(encoding="utf-8", errors="replace")
+text = text.replace("\r\n", "\n")
+
+def compact_markdown(md: str, limit: int) -> str:
+    if len(md) <= limit:
+        return md
+
+    lines = md.splitlines()
+    selected = []
+
+    # Keep headings and short list-like statements as semantic anchors.
+    for ln in lines:
+        s = ln.strip()
+        if not s:
+            continue
+        if s.startswith("#") or s.startswith("- ") or s.startswith("* ") or re.match(r"^\d+\.\s+", s):
+            selected.append(s)
+        elif len(s) <= 180 and ":" in s:
+            selected.append(s)
+
+    compact = "\n".join(selected)
+    if len(compact) < 3000:
+        # Fallback: keep first part of the file if structure is sparse.
+        compact = md[:limit]
+    if len(compact) > limit:
+        compact = compact[:limit]
+    return compact
+
+compacted = compact_markdown(text, max_chars)
+
+target = target_dir / f"{source.stem}.md"
+target.write_text(compacted.strip() + "\n", encoding="utf-8")
+print(f"Hybrid local context prepared: {target} ({len(compacted)} chars)")
+PY
+
+  export DOC_PATH="$TEMP_DOC_DIR"
   export FILE_TASK
 
   echo "Preparing hybrid research query from: $INPUT_FILE"
+  export MAX_WEB_QUERY_CHARS="${MAX_WEB_QUERY_CHARS:-360}"
   QUERY="$(python - <<'PY'
 import os
+import re
 from pathlib import Path
 import boto3
 
@@ -225,6 +286,7 @@ if model_id.startswith("bedrock:"):
 source = Path(os.environ["INPUT_FILE"])
 content = source.read_text(encoding="utf-8", errors="replace")
 file_task = os.getenv("FILE_TASK", "").strip()
+max_chars = int(os.getenv("MAX_WEB_QUERY_CHARS", "520"))
 
 prompt = f"""
 Create a short English web-research task for GPT Researcher based on this markdown brief.
@@ -232,7 +294,7 @@ Create a short English web-research task for GPT Researcher based on this markdo
 The task will be used as a web-search seed. The full markdown file is already loaded separately as local context via DOC_PATH, so do not restate the brief.
 
 Rules:
-- 350 to 650 characters;
+- 180 to 320 characters;
 - one compact paragraph;
 - mention the core topic, target market, and evidence types to find;
 - include key terms that should guide search query generation;
@@ -256,10 +318,11 @@ resp = client.converse(
     inferenceConfig={"maxTokens": 350, "temperature": 0},
 )
 query = resp["output"]["message"]["content"][0]["text"].strip()
+query = re.sub(r"\s+", " ", query).strip()
 
-if len(query) > 800:
+if len(query) > max_chars:
     compress_prompt = (
-        "Compress this web-research task to 350-650 characters. "
+        f"Compress this web-research task to 180-{max_chars} characters. "
         "Keep core topic, market, evidence types, and search terms. "
         "Return one compact paragraph only.\n\n"
         + query
@@ -270,11 +333,19 @@ if len(query) > 800:
         inferenceConfig={"maxTokens": 220, "temperature": 0},
     )
     query = resp["output"]["message"]["content"][0]["text"].strip()
+    query = re.sub(r"\s+", " ", query).strip()
 
-if len(query) > 750:
-    cut = query[:750]
+if len(query) > max_chars:
+    cut = query[:max_chars]
     last_period = max(cut.rfind("."), cut.rfind(";"))
-    query = cut[:last_period + 1] if last_period > 350 else cut.rstrip()
+    query = cut[:last_period + 1] if last_period > 180 else cut.rstrip()
+
+if len(query) < 80:
+    fallback = (file_task or source.stem).strip()
+    fallback = re.sub(r"\s+", " ", fallback)
+    if len(fallback) > max_chars:
+        fallback = fallback[:max_chars].rstrip()
+    query = fallback
 
 print(query)
 PY
@@ -290,7 +361,7 @@ fi
 
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 RUN_LOG="$LOGS_DIR/${RUN_ID}-research.log"
-HYBRID_TIMEOUT_SECONDS="${HYBRID_TIMEOUT_SECONDS:-480}"
+HYBRID_TIMEOUT_SECONDS="${HYBRID_TIMEOUT_SECONDS:-900}"
 WEB_TIMEOUT_SECONDS="${WEB_TIMEOUT_SECONDS:-480}"
 
 log_ts() {
