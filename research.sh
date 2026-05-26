@@ -119,6 +119,14 @@ for var in FAST_LLM SMART_LLM STRATEGIC_LLM; do
   fi
 done
 
+if [[ "${FAST_LLM:-}" == bedrock:* || "${SMART_LLM:-}" == bedrock:* || "${STRATEGIC_LLM:-}" == bedrock:* ]]; then
+  if [[ -z "${LLM_KWARGS:-}" ]]; then
+    # Raise Bedrock client read timeout above SDK default (60s) to reduce long-call failures.
+    export LLM_KWARGS='{"timeout":300,"max_retries":8}'
+    echo "LLM_KWARGS not set; using default Bedrock client settings: $LLM_KWARGS"
+  fi
+fi
+
 if [[ -z "${AWS_DEFAULT_REGION:-}" && -z "${AWS_REGION:-}" ]]; then
   echo "Error: set AWS_DEFAULT_REGION (or AWS_REGION) in .env"
   exit 1
