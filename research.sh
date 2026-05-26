@@ -7,14 +7,21 @@ REPORTS_DIR="$HOME/Downloads"
 ENV_FILE="$ROOT_DIR/.env"
 LOGS_DIR="$ROOT_DIR/logs"
 
+print_usage() {
+  echo "Usage: ./research.sh [--ru|--en] [--file /path/context.md [--file-mode source|query] [--verify-brief] [\"extra focus\"] | \"topic\"]"
+}
+
 if [[ $# -lt 1 ]]; then
-  echo "Usage: ./research.sh [--ru|--en] [--file /path/context.md | \"topic\"]"
+  print_usage
   exit 1
 fi
 
 TRANSLATE_TO_RU=1
 FILE_MODE=0
 INPUT_FILE=""
+FILE_MODE_KIND="query"
+FILE_MODE_KIND_EXPLICIT=0
+VERIFY_BRIEF=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --ru)
@@ -34,6 +41,27 @@ while [[ $# -gt 0 ]]; do
       INPUT_FILE="$2"
       shift 2
       ;;
+    --file-mode)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --file-mode requires 'source' or 'query'"
+        exit 1
+      fi
+      case "$2" in
+        source|query)
+          FILE_MODE_KIND="$2"
+          FILE_MODE_KIND_EXPLICIT=1
+          shift 2
+          ;;
+        *)
+          echo "Error: --file-mode must be 'source' or 'query'"
+          exit 1
+          ;;
+      esac
+      ;;
+    --verify-brief)
+      VERIFY_BRIEF=1
+      shift
+      ;;
     --)
       shift
       break
@@ -49,7 +77,17 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "$FILE_MODE" -eq 0 && $# -lt 1 ]]; then
-  echo "Usage: ./research.sh [--ru|--en] [--file /path/context.md | \"topic\"]"
+  print_usage
+  exit 1
+fi
+
+if [[ "$FILE_MODE" -eq 0 && "$FILE_MODE_KIND_EXPLICIT" -eq 1 ]]; then
+  echo "Error: --file-mode can only be used together with --file"
+  exit 1
+fi
+
+if [[ "$FILE_MODE" -eq 0 && "$VERIFY_BRIEF" -eq 1 ]]; then
+  echo "Error: --verify-brief can only be used together with --file"
   exit 1
 fi
 
@@ -69,7 +107,11 @@ import sys
 print(Path(sys.argv[1]).expanduser().resolve())
 PY
 )"
-  REPORT_SOURCE="hybrid"
+  if [[ "$FILE_MODE_KIND" == "source" ]]; then
+    REPORT_SOURCE="hybrid"
+  else
+    REPORT_SOURCE="web"
+  fi
 fi
 
 if [[ ! -d "$APP_DIR" || ! -f "$APP_DIR/cli.py" ]]; then
@@ -217,13 +259,54 @@ echo "Bedrock check passed for model: $BEDROCK_MODEL_ID"
 mkdir -p "$REPORTS_DIR"
 mkdir -p "$LOGS_DIR"
 
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+RUN_LOG="$LOGS_DIR/${RUN_ID}-research.log"
+HYBRID_TIMEOUT_SECONDS="${HYBRID_TIMEOUT_SECONDS:-900}"
+WEB_TIMEOUT_SECONDS="${WEB_TIMEOUT_SECONDS:-480}"
+
+log_ts() {
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" | tee -a "$RUN_LOG"
+}
+
+phase_start() {
+  local phase="$1"
+  local now
+  now="$(date +%s)"
+  eval "PHASE_${phase}_START=${now}"
+  log_ts "phase_start name=${phase}"
+}
+
+phase_done() {
+  local phase="$1"
+  local reason="${2:-success}"
+  local now start_var start dur
+  now="$(date +%s)"
+  start_var="PHASE_${phase}_START"
+  start="${!start_var:-$now}"
+  dur=$((now - start))
+  log_ts "phase_done name=${phase} duration_s=${dur} reason=${reason}"
+}
+
+exit_reason() {
+  local code="${1:-1}"
+  if [[ "$code" -eq 0 ]]; then
+    echo "success"
+  elif [[ "$code" -eq 124 ]]; then
+    echo "timeout"
+  else
+    echo "error_exit_${code}"
+  fi
+}
+
 if [[ "$FILE_MODE" -eq 1 ]]; then
-  TEMP_DOC_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gpt-research-docs.XXXXXX")"
-  trap '[[ -n "${TEMP_DOC_DIR:-}" && -d "$TEMP_DOC_DIR" ]] && rm -rf "$TEMP_DOC_DIR"' EXIT
+  phase_start "seed_query_from_file"
   export INPUT_FILE
-  export TEMP_DOC_DIR
-  export HYBRID_DOC_MAX_CHARS="${HYBRID_DOC_MAX_CHARS:-45000}"
-  python - <<'PY'
+  if [[ "$FILE_MODE_KIND" == "source" ]]; then
+    TEMP_DOC_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gpt-research-docs.XXXXXX")"
+    trap '[[ -n "${TEMP_DOC_DIR:-}" && -d "$TEMP_DOC_DIR" ]] && rm -rf "$TEMP_DOC_DIR"' EXIT
+    export TEMP_DOC_DIR
+    export HYBRID_DOC_MAX_CHARS="${HYBRID_DOC_MAX_CHARS:-45000}"
+    python - <<'PY'
 import os
 import re
 from pathlib import Path
@@ -267,10 +350,11 @@ target.write_text(compacted.strip() + "\n", encoding="utf-8")
 print(f"Hybrid local context prepared: {target} ({len(compacted)} chars)")
 PY
 
-  export DOC_PATH="$TEMP_DOC_DIR"
-  export FILE_TASK
+    export DOC_PATH="$TEMP_DOC_DIR"
+  fi
+  export FILE_TASK FILE_MODE_KIND
 
-  echo "Preparing hybrid research query from: $INPUT_FILE"
+  echo "Preparing ${FILE_MODE_KIND} research query from: $INPUT_FILE"
   export MAX_WEB_QUERY_CHARS="${MAX_WEB_QUERY_CHARS:-360}"
   QUERY="$(python - <<'PY'
 import os
@@ -286,12 +370,24 @@ if model_id.startswith("bedrock:"):
 source = Path(os.environ["INPUT_FILE"])
 content = source.read_text(encoding="utf-8", errors="replace")
 file_task = os.getenv("FILE_TASK", "").strip()
+mode = os.getenv("FILE_MODE_KIND", "query")
 max_chars = int(os.getenv("MAX_WEB_QUERY_CHARS", "520"))
+
+if mode == "source":
+    mode_note = (
+        "The task will be used as a web-search seed. The full markdown file "
+        "is loaded separately as local context via DOC_PATH, so do not restate the brief."
+    )
+else:
+    mode_note = (
+        "The markdown file is NOT loaded as local context. Build a compact but "
+        "self-sufficient web research task from the brief content."
+    )
 
 prompt = f"""
 Create a short English web-research task for GPT Researcher based on this markdown brief.
 
-The task will be used as a web-search seed. The full markdown file is already loaded separately as local context via DOC_PATH, so do not restate the brief.
+{mode_note}
 
 Rules:
 - 180 to 320 characters;
@@ -351,27 +447,28 @@ print(query)
 PY
 )"
   if [[ -z "$QUERY" ]]; then
+    phase_done "seed_query_from_file" "error_empty_query"
     echo "Error: generated research query is empty"
     exit 1
   fi
   echo "Generated web research seed:"
   echo "$QUERY"
-  echo "Hybrid DOC_PATH: $DOC_PATH"
+  if [[ "$FILE_MODE_KIND" == "source" ]]; then
+    echo "Legacy source mode enabled: file is loaded into DOC_PATH."
+    echo "Hybrid DOC_PATH: $DOC_PATH"
+  else
+    echo "Query mode: markdown brief used only to build web query (DOC_PATH disabled)."
+  fi
+  phase_done "seed_query_from_file" "success"
 fi
-
-RUN_ID="$(date +%Y%m%d-%H%M%S)"
-RUN_LOG="$LOGS_DIR/${RUN_ID}-research.log"
-HYBRID_TIMEOUT_SECONDS="${HYBRID_TIMEOUT_SECONDS:-900}"
-WEB_TIMEOUT_SECONDS="${WEB_TIMEOUT_SECONDS:-480}"
-
-log_ts() {
-  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" | tee -a "$RUN_LOG"
-}
 
 {
   echo "run_id=$RUN_ID"
   echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "report_source=$REPORT_SOURCE"
+  echo "file_mode=${FILE_MODE}"
+  echo "file_mode_kind=${FILE_MODE_KIND}"
+  echo "verify_brief=${VERIFY_BRIEF}"
   echo "translate_to_ru=$TRANSLATE_TO_RU"
   echo "input_file=${INPUT_FILE:-}"
   echo "doc_path=${DOC_PATH:-}"
@@ -380,7 +477,7 @@ log_ts() {
   echo "$QUERY"
   echo
   echo "--- raw output ---"
-} > "$RUN_LOG"
+} >> "$RUN_LOG"
 echo "Run log: $RUN_LOG"
 
 RAW_OUTPUT_FILE="$(mktemp "${TMPDIR:-/tmp}/gpt-research-raw.${RUN_ID}.XXXXXX")"
@@ -435,33 +532,42 @@ EXEC_SOURCE="$REPORT_SOURCE"
 RUN_EXIT=0
 
 if [[ "$REPORT_SOURCE" == "hybrid" ]]; then
+  phase_start "research_hybrid"
   log_ts "hybrid_start timeout=${HYBRID_TIMEOUT_SECONDS}s"
   if run_cli_with_timeout "hybrid" "$HYBRID_TIMEOUT_SECONDS"; then
     RUN_EXIT=0
     EXEC_SOURCE="hybrid"
     log_ts "hybrid_success"
+    phase_done "research_hybrid" "success"
   else
     RUN_EXIT=$?
+    phase_done "research_hybrid" "$(exit_reason "$RUN_EXIT")"
     log_ts "hybrid_failed exit_code=$RUN_EXIT fallback=web"
+    phase_start "research_web_fallback"
     log_ts "web_fallback_start timeout=${WEB_TIMEOUT_SECONDS}s"
     if run_cli_with_timeout "web" "$WEB_TIMEOUT_SECONDS"; then
       RUN_EXIT=0
       EXEC_SOURCE="web"
       log_ts "web_fallback_success"
+      phase_done "research_web_fallback" "success"
     else
       RUN_EXIT=$?
       log_ts "web_fallback_failed exit_code=$RUN_EXIT"
+      phase_done "research_web_fallback" "$(exit_reason "$RUN_EXIT")"
     fi
   fi
 else
+  phase_start "research_web"
   log_ts "web_start timeout=${WEB_TIMEOUT_SECONDS}s"
   if run_cli_with_timeout "web" "$WEB_TIMEOUT_SECONDS"; then
     RUN_EXIT=0
     EXEC_SOURCE="web"
     log_ts "web_success"
+    phase_done "research_web" "success"
   else
     RUN_EXIT=$?
     log_ts "web_failed exit_code=$RUN_EXIT"
+    phase_done "research_web" "$(exit_reason "$RUN_EXIT")"
   fi
 fi
 
@@ -514,6 +620,7 @@ PY
 fi
 
 if [[ "$TRANSLATE_TO_RU" -eq 1 ]]; then
+  phase_start "translation_ru"
   log_ts "translation_start mode=ru"
   DEST_REPORT="${BASE_REPORT_PATH}.md"
   export SRC_REPORT DEST_REPORT
@@ -607,11 +714,302 @@ except (ClientError, BotoCoreError, Exception) as e:
     print(f"Saved report: {dst}")
 PY
   log_ts "translation_done"
+  phase_done "translation_ru" "success"
 else
   log_ts "translation_skip mode=en"
+  phase_done "translation_ru" "skipped_en"
   DEST_REPORT="${BASE_REPORT_PATH}.md"
   cp "$SRC_REPORT" "$DEST_REPORT"
   echo "Saved report: $DEST_REPORT"
+fi
+
+if [[ "$FILE_MODE" -eq 1 && "$VERIFY_BRIEF" -eq 1 ]]; then
+  phase_start "brief_verification"
+  log_ts "brief_verification_start mode=${FILE_MODE_KIND}"
+  export DEST_REPORT INPUT_FILE
+  export VERIFY_MAX_CLAIMS="${VERIFY_MAX_CLAIMS:-8}"
+  export VERIFY_MAX_RESULTS="${VERIFY_MAX_RESULTS:-5}"
+  if python - <<'PY'
+import json
+import os
+import re
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
+
+report_path = Path(os.environ["DEST_REPORT"])
+input_path = Path(os.environ["INPUT_FILE"])
+api_key = os.getenv("TAVILY_API_KEY", "").strip()
+max_claims = max(1, int(os.getenv("VERIFY_MAX_CLAIMS", "8")))
+max_results = max(1, min(10, int(os.getenv("VERIFY_MAX_RESULTS", "5"))))
+region = os.getenv("AWS_DEFAULT_REGION") or os.getenv("AWS_REGION")
+model_id = os.getenv("SMART_LLM", "")
+if model_id.startswith("bedrock:"):
+    model_id = model_id.split(":", 1)[1]
+
+if not report_path.exists():
+    print(f"Warning: report not found for verification: {report_path}")
+    raise SystemExit(0)
+if not input_path.exists():
+    print(f"Warning: input brief not found for verification: {input_path}")
+    raise SystemExit(0)
+if not api_key:
+    print("Warning: TAVILY_API_KEY missing; skipping brief verification")
+    raise SystemExit(0)
+
+brief_text = input_path.read_text(encoding="utf-8", errors="replace").strip()
+if not brief_text:
+    print("Warning: empty brief file; skipping verification")
+    raise SystemExit(0)
+
+client = boto3.client("bedrock-runtime", region_name=region)
+
+def llm(prompt: str, max_tokens: int = 1800) -> str:
+    resp = client.converse(
+        modelId=model_id,
+        messages=[{"role": "user", "content": [{"text": prompt}]}],
+        inferenceConfig={"maxTokens": max_tokens, "temperature": 0},
+    )
+    return resp["output"]["message"]["content"][0]["text"].strip()
+
+def parse_json_from_text(text: str):
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+    match = re.search(r"(\{.*\}|\[.*\])", text, flags=re.S)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except Exception:
+            return None
+    return None
+
+def extract_claims(text: str):
+    prompt = f"""
+Extract up to {max_claims} factual claims from this markdown brief.
+
+Rules:
+- Return strict JSON array only: [{{"claim":"..."}}]
+- Include only claims that can be checked against external web sources.
+- Ignore preferences, style notes, and questions.
+- Keep each claim concise and specific.
+
+Markdown brief:
+{text}
+"""
+    raw = llm(prompt, max_tokens=1200)
+    payload = parse_json_from_text(raw)
+    claims = []
+    if isinstance(payload, list):
+        for item in payload:
+            if isinstance(item, dict):
+                claim = str(item.get("claim", "")).strip()
+            else:
+                claim = str(item).strip()
+            if claim:
+                claims.append(claim)
+    deduped = []
+    seen = set()
+    for claim in claims:
+        key = re.sub(r"\s+", " ", claim).strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(claim)
+    return deduped[:max_claims]
+
+def tavily_search(query: str):
+    body = json.dumps(
+        {
+            "query": query,
+            "search_depth": "basic",
+            "max_results": max_results,
+            "include_answer": False,
+            "include_raw_content": False,
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.tavily.com/search",
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=40) as resp:
+        data = json.loads(resp.read().decode("utf-8", errors="replace"))
+    return data.get("results") or []
+
+def evaluate_claim(claim: str, results: list[dict]):
+    evidence_chunks = []
+    cleaned_results = []
+    for idx, result in enumerate(results, start=1):
+        url = str(result.get("url") or result.get("href") or "").strip()
+        title = str(result.get("title") or "").strip()
+        snippet = str(result.get("content") or result.get("body") or "").strip()
+        if not url:
+            continue
+        cleaned_results.append({"url": url, "title": title, "snippet": snippet})
+        evidence_chunks.append(
+            f"[{idx}] URL: {url}\nTitle: {title or 'n/a'}\nSnippet: {snippet[:700] or 'n/a'}"
+        )
+
+    if not cleaned_results:
+        return {
+            "status": "unverified",
+            "note": "No external evidence was retrieved for this claim.",
+            "evidence_url": "n/a",
+        }
+
+    prompt = f"""
+Fact-check exactly one claim using only the external evidence snippets below.
+
+Claim:
+{claim}
+
+External evidence:
+{chr(10).join(evidence_chunks)}
+
+Rules:
+- The brief itself is NOT evidence.
+- Use only snippets and URLs above.
+- status=verified: evidence clearly supports claim, no major contradiction.
+- status=conflicting: evidence contradicts claim or gives mixed signals.
+- status=unverified: evidence is insufficient to confirm or deny.
+
+Return strict JSON only:
+{{
+  "status": "verified|conflicting|unverified",
+  "note": "short reason",
+  "evidence_index": <number or null>
+}}
+"""
+    raw = llm(prompt, max_tokens=700)
+    payload = parse_json_from_text(raw)
+    status = "unverified"
+    note = "Insufficient external evidence."
+    evidence_url = "n/a"
+    if isinstance(payload, dict):
+        cand_status = str(payload.get("status", "")).strip().lower()
+        if cand_status in {"verified", "conflicting", "unverified"}:
+            status = cand_status
+        cand_note = str(payload.get("note", "")).strip()
+        if cand_note:
+            note = cand_note
+        index = payload.get("evidence_index")
+        if isinstance(index, int) and 1 <= index <= len(cleaned_results):
+            evidence_url = cleaned_results[index - 1]["url"]
+    if evidence_url == "n/a":
+        evidence_url = cleaned_results[0]["url"]
+    return {"status": status, "note": note, "evidence_url": evidence_url}
+
+def esc_cell(value: str) -> str:
+    text = str(value or "").replace("\n", " ").replace("\r", " ").strip()
+    text = re.sub(r"\s+", " ", text)
+    return text.replace("|", "\\|")
+
+rows = []
+try:
+    claims = extract_claims(brief_text)
+except (ClientError, BotoCoreError, Exception) as e:
+    claims = []
+    rows.append(
+        {
+            "claim": "n/a",
+            "status": "unverified",
+            "url": "n/a",
+            "note": f"Claim extraction failed: {e}",
+        }
+    )
+
+for claim in claims:
+    try:
+        results = tavily_search(claim)
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, Exception) as e:
+        rows.append(
+            {
+                "claim": claim,
+                "status": "unverified",
+                "url": "n/a",
+                "note": f"Search error: {e}",
+            }
+        )
+        continue
+    try:
+        verdict = evaluate_claim(claim, results)
+    except (ClientError, BotoCoreError, Exception) as e:
+        verdict = {
+            "status": "unverified",
+            "note": f"Evaluation error: {e}",
+            "evidence_url": (results[0].get("url") if results else "n/a"),
+        }
+    rows.append(
+        {
+            "claim": claim,
+            "status": verdict["status"],
+            "url": verdict["evidence_url"],
+            "note": verdict["note"],
+        }
+    )
+
+if not rows:
+    rows.append(
+        {
+            "claim": "n/a",
+            "status": "unverified",
+            "url": "n/a",
+            "note": "No factual claims were extracted from the brief.",
+        }
+    )
+
+section = [
+    "## Brief Claim Verification",
+    "",
+    "_External URLs are the only evidence source; brief text is not treated as evidence._",
+    "",
+    "| Claim | Status | Evidence URL | Note |",
+    "|---|---|---|---|",
+]
+for row in rows:
+    section.append(
+        "| "
+        + esc_cell(row["claim"])
+        + " | "
+        + esc_cell(row["status"])
+        + " | "
+        + esc_cell(row["url"])
+        + " | "
+        + esc_cell(row["note"])
+        + " |"
+    )
+
+report_text = report_path.read_text(encoding="utf-8", errors="replace").rstrip()
+section_text = "\n".join(section).rstrip()
+if "## Brief Claim Verification" in report_text:
+    report_text = re.sub(
+        r"\n## Brief Claim Verification[\s\S]*$",
+        "",
+        report_text,
+        flags=re.M,
+    ).rstrip()
+
+report_path.write_text(report_text + "\n\n" + section_text + "\n", encoding="utf-8")
+print(f"Brief verification rows: {len(rows)}")
+PY
+  then
+    log_ts "brief_verification_done"
+    phase_done "brief_verification" "success"
+  else
+    verify_exit=$?
+    log_ts "brief_verification_failed exit_code=${verify_exit}"
+    phase_done "brief_verification" "$(exit_reason "$verify_exit")"
+  fi
+elif [[ "$FILE_MODE" -eq 1 ]]; then
+  phase_done "brief_verification" "skipped_disabled"
 fi
 
 {

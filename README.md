@@ -35,6 +35,24 @@ Research from a markdown brief:
 ./research.sh --file "/Users/melanin/Downloads/context.md"
 ```
 
+Explicit web-only mode (same behavior as default for `--file`):
+
+```bash
+./research.sh --file "/Users/melanin/Downloads/context.md" --file-mode query
+```
+
+Legacy hybrid mode (only when you explicitly need local DOC_PATH context):
+
+```bash
+./research.sh --file "/Users/melanin/Downloads/context.md" --file-mode source
+```
+
+Optional brief claim verification (adds verification table to report):
+
+```bash
+./research.sh --file "/Users/melanin/Downloads/context.md" --verify-brief
+```
+
 You can add a specific focus after the file:
 
 ```bash
@@ -52,11 +70,28 @@ Output file format:
 - default: `~/Downloads/YYYY-MM-DD-topic.md`
 - with `--en`: `~/Downloads/YYYY-MM-DD-topic.md`
 
-For `--file`, the script uses GPT Researcher hybrid mode:
+For `--file`, the script supports two modes:
 
-- the markdown file is loaded as local context via `DOC_PATH`
-- Bedrock creates a concise research query from the file
-- Tavily/web search validates and expands the brief with external sources
+- default `--file-mode query`:
+  - runs `report_source=web`
+  - markdown is used only to create a compact web query
+  - no `DOC_PATH` local-context loading
+- legacy `--file-mode source`:
+  - runs `report_source=hybrid`
+  - markdown is loaded as local context via `DOC_PATH`
+  - on hybrid failure, script auto-falls back to web mode
+
+For `--file --verify-brief`, a post-check section is appended to the report:
+
+- `## Brief Claim Verification`
+- table columns: `Claim | Status | Evidence URL | Note`
+- statuses: `verified`, `conflicting`, `unverified`
+- only external URLs are treated as evidence (brief text itself is not evidence)
+
+Phase diagnostics in run log:
+
+- `phase_start name=...`
+- `phase_done name=... duration_s=... reason=...`
 
 `research.sh` performs preflight checks:
 
