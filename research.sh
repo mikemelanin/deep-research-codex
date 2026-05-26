@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$ROOT_DIR/gpt-researcher"
 REPORTS_DIR="$HOME/Downloads"
 ENV_FILE="$ROOT_DIR/.env"
+LOGS_DIR="$ROOT_DIR/logs"
 
 if [[ $# -lt 1 ]]; then
   echo "Usage: ./research.sh [--ru|--en] [--file /path/context.md | \"topic\"]"
@@ -192,6 +193,7 @@ PY
 echo "Bedrock check passed for model: $BEDROCK_MODEL_ID"
 
 mkdir -p "$REPORTS_DIR"
+mkdir -p "$LOGS_DIR"
 
 if [[ "$FILE_MODE" -eq 1 ]]; then
   TEMP_DOC_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gpt-research-docs.XXXXXX")"
@@ -273,16 +275,125 @@ PY
     echo "Error: generated research query is empty"
     exit 1
   fi
+  echo "Generated web research seed:"
+  echo "$QUERY"
   echo "Hybrid DOC_PATH: $DOC_PATH"
 fi
 
-RAW_OUTPUT="$(cd "$APP_DIR" && python cli.py "$QUERY" --report_type research_report --report_source "$REPORT_SOURCE" --no-pdf --no-docx 2>&1)" || {
-  echo "$RAW_OUTPUT"
-  echo "Error: GPT Researcher execution failed"
-  exit 1
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+RUN_LOG="$LOGS_DIR/${RUN_ID}-research.log"
+HYBRID_TIMEOUT_SECONDS="${HYBRID_TIMEOUT_SECONDS:-480}"
+WEB_TIMEOUT_SECONDS="${WEB_TIMEOUT_SECONDS:-480}"
+
+log_ts() {
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" | tee -a "$RUN_LOG"
 }
 
-echo "$RAW_OUTPUT"
+{
+  echo "run_id=$RUN_ID"
+  echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "report_source=$REPORT_SOURCE"
+  echo "translate_to_ru=$TRANSLATE_TO_RU"
+  echo "input_file=${INPUT_FILE:-}"
+  echo "doc_path=${DOC_PATH:-}"
+  echo "query_chars=${#QUERY}"
+  echo "query:"
+  echo "$QUERY"
+  echo
+  echo "--- raw output ---"
+} > "$RUN_LOG"
+echo "Run log: $RUN_LOG"
+
+RAW_OUTPUT_FILE="$(mktemp "${TMPDIR:-/tmp}/gpt-research-raw.${RUN_ID}.XXXXXX")"
+trap '[[ -n "${TEMP_DOC_DIR:-}" && -d "$TEMP_DOC_DIR" ]] && rm -rf "$TEMP_DOC_DIR"; [[ -n "${RAW_OUTPUT_FILE:-}" && -f "$RAW_OUTPUT_FILE" ]] && rm -f "$RAW_OUTPUT_FILE"' EXIT
+
+run_cli_with_timeout() {
+  local source="$1"
+  local timeout_sec="$2"
+  python - "$APP_DIR" "$QUERY" "$source" "$timeout_sec" "$RAW_OUTPUT_FILE" <<'PY'
+import subprocess
+import sys
+from pathlib import Path
+
+app_dir, query, source, timeout_sec, raw_file = sys.argv[1:]
+timeout_sec = int(timeout_sec)
+cmd = [
+    sys.executable, "cli.py", query,
+    "--report_type", "research_report",
+    "--report_source", source,
+    "--no-pdf", "--no-docx",
+]
+try:
+    proc = subprocess.run(
+        cmd,
+        cwd=app_dir,
+        capture_output=True,
+        text=True,
+        timeout=timeout_sec,
+        env={**dict(), **__import__("os").environ, "PYTHONUNBUFFERED": "1"},
+    )
+    out = (proc.stdout or "") + (proc.stderr or "")
+    Path(raw_file).write_text(out, encoding="utf-8")
+    print(out, end="")
+    sys.exit(proc.returncode)
+except subprocess.TimeoutExpired as e:
+    def _norm(v):
+        if v is None:
+            return ""
+        if isinstance(v, bytes):
+            return v.decode("utf-8", errors="replace")
+        return v
+    out = _norm(e.stdout) + _norm(e.stderr)
+    Path(raw_file).write_text(out, encoding="utf-8")
+    if out:
+        print(out, end="")
+    print(f"\nError: CLI timed out after {timeout_sec}s for report_source={source}")
+    sys.exit(124)
+PY
+}
+
+EXEC_SOURCE="$REPORT_SOURCE"
+RUN_EXIT=0
+
+if [[ "$REPORT_SOURCE" == "hybrid" ]]; then
+  log_ts "hybrid_start timeout=${HYBRID_TIMEOUT_SECONDS}s"
+  if run_cli_with_timeout "hybrid" "$HYBRID_TIMEOUT_SECONDS"; then
+    RUN_EXIT=0
+    EXEC_SOURCE="hybrid"
+    log_ts "hybrid_success"
+  else
+    RUN_EXIT=$?
+    log_ts "hybrid_failed exit_code=$RUN_EXIT fallback=web"
+    log_ts "web_fallback_start timeout=${WEB_TIMEOUT_SECONDS}s"
+    if run_cli_with_timeout "web" "$WEB_TIMEOUT_SECONDS"; then
+      RUN_EXIT=0
+      EXEC_SOURCE="web"
+      log_ts "web_fallback_success"
+    else
+      RUN_EXIT=$?
+      log_ts "web_fallback_failed exit_code=$RUN_EXIT"
+    fi
+  fi
+else
+  log_ts "web_start timeout=${WEB_TIMEOUT_SECONDS}s"
+  if run_cli_with_timeout "web" "$WEB_TIMEOUT_SECONDS"; then
+    RUN_EXIT=0
+    EXEC_SOURCE="web"
+    log_ts "web_success"
+  else
+    RUN_EXIT=$?
+    log_ts "web_failed exit_code=$RUN_EXIT"
+  fi
+fi
+
+RAW_OUTPUT="$(cat "$RAW_OUTPUT_FILE")"
+printf '%s\n' "$RAW_OUTPUT" >> "$RUN_LOG"
+
+if [[ "$RUN_EXIT" -ne 0 ]]; then
+  echo "Error: GPT Researcher execution failed"
+  exit "$RUN_EXIT"
+fi
+echo "effective_report_source=$EXEC_SOURCE" >> "$RUN_LOG"
 
 REPORT_REL_PATH="$(printf '%s\n' "$RAW_OUTPUT" | sed -n "s/.*Report written to '\(outputs\/[^']*\.md\)'.*/\1/p" | tail -n 1)"
 
@@ -296,6 +407,7 @@ if [[ ! -f "$SRC_REPORT" ]]; then
   echo "Error: generated report not found at $SRC_REPORT"
   exit 1
 fi
+echo "source_report=$SRC_REPORT" >> "$RUN_LOG"
 
 SLUG="$(python - "$QUERY" <<'PY'
 import re
@@ -323,6 +435,7 @@ PY
 fi
 
 if [[ "$TRANSLATE_TO_RU" -eq 1 ]]; then
+  log_ts "translation_start mode=ru"
   DEST_REPORT="${BASE_REPORT_PATH}.md"
   export SRC_REPORT DEST_REPORT
   python - <<'PY'
@@ -414,8 +527,16 @@ except (ClientError, BotoCoreError, Exception) as e:
     dst.write_text(content, encoding="utf-8")
     print(f"Saved report: {dst}")
 PY
+  log_ts "translation_done"
 else
+  log_ts "translation_skip mode=en"
   DEST_REPORT="${BASE_REPORT_PATH}.md"
   cp "$SRC_REPORT" "$DEST_REPORT"
   echo "Saved report: $DEST_REPORT"
 fi
+
+{
+  echo "saved_report=$DEST_REPORT"
+  echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+} >> "$RUN_LOG"
+echo "Saved log: $RUN_LOG"
