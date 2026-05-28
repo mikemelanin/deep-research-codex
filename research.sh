@@ -6,9 +6,13 @@ APP_DIR="$ROOT_DIR/gpt-researcher"
 REPORTS_DIR="$HOME/Downloads"
 ENV_FILE="$ROOT_DIR/.env"
 LOGS_DIR="$ROOT_DIR/logs"
+SCRIPTS_DIR="$ROOT_DIR/scripts"
+PREFILTER_SCRIPT="$SCRIPTS_DIR/prefilter_query.py"
+RUN_CLI_SCRIPT="$SCRIPTS_DIR/run_research_cli.py"
+TRANSLATE_SCRIPT="$SCRIPTS_DIR/translate_report_ru.py"
 
 print_usage() {
-  echo "Usage: ./research.sh [--ru|--en] [--file /path/context.md [--file-mode source|query] [--verify-brief] [\"extra focus\"] | \"topic\"]"
+  echo "Usage: ./research.sh [--ru|--en] [--file /path/input.txt|.md] \"/path/notes.md\" | \"topic or raw dump\""
 }
 
 if [[ $# -lt 1 ]]; then
@@ -17,11 +21,7 @@ if [[ $# -lt 1 ]]; then
 fi
 
 TRANSLATE_TO_RU=1
-FILE_MODE=0
 INPUT_FILE=""
-FILE_MODE_KIND="query"
-FILE_MODE_KIND_EXPLICIT=0
-VERIFY_BRIEF=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --ru)
@@ -37,30 +37,8 @@ while [[ $# -gt 0 ]]; do
         echo "Error: --file requires a path"
         exit 1
       fi
-      FILE_MODE=1
       INPUT_FILE="$2"
       shift 2
-      ;;
-    --file-mode)
-      if [[ $# -lt 2 ]]; then
-        echo "Error: --file-mode requires 'source' or 'query'"
-        exit 1
-      fi
-      case "$2" in
-        source|query)
-          FILE_MODE_KIND="$2"
-          FILE_MODE_KIND_EXPLICIT=1
-          shift 2
-          ;;
-        *)
-          echo "Error: --file-mode must be 'source' or 'query'"
-          exit 1
-          ;;
-      esac
-      ;;
-    --verify-brief)
-      VERIFY_BRIEF=1
-      shift
       ;;
     --)
       shift
@@ -76,42 +54,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "$FILE_MODE" -eq 0 && $# -lt 1 ]]; then
+QUERY_RAW="$*"
+if [[ -z "$INPUT_FILE" && "$#" -eq 1 && -f "$1" && "$1" == *.md ]]; then
+  INPUT_FILE="$1"
+  QUERY_RAW=""
+fi
+if [[ -z "$INPUT_FILE" && -z "$QUERY_RAW" ]]; then
   print_usage
   exit 1
-fi
-
-if [[ "$FILE_MODE" -eq 0 && "$FILE_MODE_KIND_EXPLICIT" -eq 1 ]]; then
-  echo "Error: --file-mode can only be used together with --file"
-  exit 1
-fi
-
-if [[ "$FILE_MODE" -eq 0 && "$VERIFY_BRIEF" -eq 1 ]]; then
-  echo "Error: --verify-brief can only be used together with --file"
-  exit 1
-fi
-
-QUERY="$*"
-FILE_TASK="$QUERY"
-REPORT_SOURCE="web"
-TEMP_DOC_DIR=""
-
-if [[ "$FILE_MODE" -eq 1 ]]; then
-  if [[ ! -f "$INPUT_FILE" ]]; then
-    echo "Error: input file not found: $INPUT_FILE"
-    exit 1
-  fi
-  INPUT_FILE="$(python3 - "$INPUT_FILE" <<'PY'
-from pathlib import Path
-import sys
-print(Path(sys.argv[1]).expanduser().resolve())
-PY
-)"
-  if [[ "$FILE_MODE_KIND" == "source" ]]; then
-    REPORT_SOURCE="hybrid"
-  else
-    REPORT_SOURCE="web"
-  fi
 fi
 
 if [[ ! -d "$APP_DIR" || ! -f "$APP_DIR/cli.py" ]]; then
@@ -123,7 +73,6 @@ if [[ ! -f "$ROOT_DIR/.venv/bin/activate" ]]; then
   echo "Error: virtualenv not found. Create it first: python3 -m venv .venv"
   exit 1
 fi
-
 source "$ROOT_DIR/.venv/bin/activate"
 
 if [[ -f "$ENV_FILE" ]]; then
@@ -137,17 +86,17 @@ else
   exit 1
 fi
 
-# Prevent boto3 from using empty profile names from .env placeholders.
-if [[ "${AWS_PROFILE:-}" == "" ]]; then
-  unset AWS_PROFILE
-fi
+for script in "$PREFILTER_SCRIPT" "$RUN_CLI_SCRIPT" "$TRANSLATE_SCRIPT"; do
+  if [[ ! -f "$script" ]]; then
+    echo "Error: helper script missing: $script"
+    exit 1
+  fi
+done
 
 if [[ -z "${TAVILY_API_KEY:-}" ]]; then
   echo "Error: TAVILY_API_KEY is missing in .env"
   exit 1
 fi
-
-: "${RETRIEVER:=tavily}"
 
 for var in FAST_LLM SMART_LLM STRATEGIC_LLM; do
   val="${!var:-}"
@@ -161,113 +110,28 @@ for var in FAST_LLM SMART_LLM STRATEGIC_LLM; do
   fi
 done
 
-if [[ "${FAST_LLM:-}" == bedrock:* || "${SMART_LLM:-}" == bedrock:* || "${STRATEGIC_LLM:-}" == bedrock:* ]]; then
-  if [[ -z "${LLM_KWARGS:-}" ]]; then
-    # Raise Bedrock client read timeout above SDK default (60s) to reduce long-call failures.
-    export LLM_KWARGS='{"timeout":300,"max_retries":8}'
-    echo "LLM_KWARGS not set; using default Bedrock client settings: $LLM_KWARGS"
-  fi
-fi
-
 if [[ -z "${AWS_DEFAULT_REGION:-}" && -z "${AWS_REGION:-}" ]]; then
   echo "Error: set AWS_DEFAULT_REGION (or AWS_REGION) in .env"
   exit 1
 fi
 
-HAS_BEARER=0
-HAS_AWS_CREDS=0
-if [[ -n "${AWS_BEARER_TOKEN_BEDROCK:-}" ]]; then
-  HAS_BEARER=1
-fi
-if [[ -n "${AWS_PROFILE:-}" ]] || [[ -n "${AWS_ACCESS_KEY_ID:-}" && -n "${AWS_SECRET_ACCESS_KEY:-}" ]]; then
-  HAS_AWS_CREDS=1
-fi
-if [[ "$HAS_BEARER" -eq 0 && "$HAS_AWS_CREDS" -eq 0 ]]; then
-  echo "Error: provide either AWS_BEARER_TOKEN_BEDROCK or AWS_PROFILE/AWS_ACCESS_KEY_ID+AWS_SECRET_ACCESS_KEY"
-  exit 1
-fi
-
-# Avoid mixed Bedrock auth modes in one process.
-# Default strategy: if static AWS credentials are present, use them and ignore bearer key.
-if [[ "$HAS_BEARER" -eq 1 && "$HAS_AWS_CREDS" -eq 1 ]]; then
-  if [[ "${BEDROCK_AUTH_MODE:-aws}" == "bearer" ]]; then
-    unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE
-    HAS_AWS_CREDS=0
-    echo "Both Bedrock auth modes are set; using bearer token (BEDROCK_AUTH_MODE=bearer)."
-  else
-    unset AWS_BEARER_TOKEN_BEDROCK
-    HAS_BEARER=0
-    echo "Both Bedrock auth modes are set; using AWS credentials (default)."
-  fi
-fi
-
-BEDROCK_MODEL_ID="${SMART_LLM#bedrock:}"
-
-python - <<'PY'
-import os
-import sys
-import boto3
-from botocore.exceptions import BotoCoreError, ClientError
-
-region = os.getenv("AWS_DEFAULT_REGION") or os.getenv("AWS_REGION")
-model_id = os.getenv("SMART_LLM", "")
-if not model_id.startswith("bedrock:"):
-    print("Error: SMART_LLM must start with 'bedrock:'")
-    sys.exit(1)
-model_id = model_id.split(":", 1)[1]
-
-profile = os.getenv("AWS_PROFILE") or None
-
-try:
-    bearer = os.getenv("AWS_BEARER_TOKEN_BEDROCK")
-    if bearer:
-        # Bedrock API key (bearer token) flow - no STS check required.
-        runtime = boto3.client("bedrock-runtime", region_name=region)
-    else:
-        # Standard AWS credentials flow.
-        if profile:
-            session = boto3.Session(profile_name=profile, region_name=region)
-        else:
-            session = boto3.Session(region_name=region)
-        sts = session.client("sts", region_name=region)
-        sts.get_caller_identity()
-        runtime = session.client("bedrock-runtime", region_name=region)
-
-    runtime.converse(
-        modelId=model_id,
-        messages=[{"role": "user", "content": [{"text": "ping"}]}],
-        inferenceConfig={"maxTokens": 1, "temperature": 0},
-    )
-
-except ClientError as e:
-    code = e.response.get("Error", {}).get("Code", "Unknown")
-    msg = e.response.get("Error", {}).get("Message", str(e))
-    print(f"Bedrock check failed: {code} - {msg}")
-    print("Verify AWS creds/profile, AWS_DEFAULT_REGION, model access, and IAM permissions (bedrock:InvokeModel).")
-    sys.exit(2)
-except BotoCoreError as e:
-    print(f"Bedrock check failed: {e}")
-    print("Verify AWS credentials and region settings.")
-    sys.exit(2)
-except Exception as e:
-    print(f"Bedrock check failed: {e}")
-    sys.exit(2)
-PY
-
-echo "Bedrock check passed for model: $BEDROCK_MODEL_ID"
-
-mkdir -p "$REPORTS_DIR"
-mkdir -p "$LOGS_DIR"
-
-RUN_ID="$(date +%Y%m%d-%H%M%S)"
-RUN_LOG="$LOGS_DIR/${RUN_ID}-research.log"
-HYBRID_TIMEOUT_SECONDS="${HYBRID_TIMEOUT_SECONDS:-900}"
-WEB_TIMEOUT_SECONDS="${WEB_TIMEOUT_SECONDS:-480}"
-REPORT_TYPE="${REPORT_TYPE:-deep}"
+REPORT_TYPE="${REPORT_TYPE:-research_report}"
 DEEP_RESEARCH_BREADTH="${DEEP_RESEARCH_BREADTH:-4}"
 DEEP_RESEARCH_DEPTH="${DEEP_RESEARCH_DEPTH:-2}"
 DEEP_RESEARCH_CONCURRENCY="${DEEP_RESEARCH_CONCURRENCY:-4}"
+WEB_TIMEOUT_SECONDS="${WEB_TIMEOUT_SECONDS:-1200}"
+SOFT_LIMIT_ENABLED="${SOFT_LIMIT_ENABLED:-1}"
+SOFT_LIMIT_TAVILY_CALLS="${SOFT_LIMIT_TAVILY_CALLS:-25}"
+SOFT_LIMIT_BEDROCK_TOTAL_TOKENS="${SOFT_LIMIT_BEDROCK_TOTAL_TOKENS:-300000}"
+SOFT_LIMIT_ELAPSED_SECONDS="${SOFT_LIMIT_ELAPSED_SECONDS:-600}"
+SOFT_LIMIT_MAX_SUBQUERIES="${SOFT_LIMIT_MAX_SUBQUERIES:-12}"
+RUN_STARTED_AT_EPOCH="$(date +%s)"
 export REPORT_TYPE DEEP_RESEARCH_BREADTH DEEP_RESEARCH_DEPTH DEEP_RESEARCH_CONCURRENCY
+export SOFT_LIMIT_ENABLED SOFT_LIMIT_TAVILY_CALLS SOFT_LIMIT_BEDROCK_TOTAL_TOKENS SOFT_LIMIT_ELAPSED_SECONDS SOFT_LIMIT_MAX_SUBQUERIES RUN_STARTED_AT_EPOCH
+
+mkdir -p "$REPORTS_DIR" "$LOGS_DIR"
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+RUN_LOG="$LOGS_DIR/${RUN_ID}-research.log"
 
 log_ts() {
   printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" | tee -a "$RUN_LOG"
@@ -292,196 +156,102 @@ phase_done() {
   log_ts "phase_done name=${phase} duration_s=${dur} reason=${reason}"
 }
 
-exit_reason() {
-  local code="${1:-1}"
-  if [[ "$code" -eq 0 ]]; then
-    echo "success"
-  elif [[ "$code" -eq 124 ]]; then
-    echo "timeout"
-  else
-    echo "error_exit_${code}"
+if [[ -n "$INPUT_FILE" ]]; then
+  if [[ ! -f "$INPUT_FILE" ]]; then
+    echo "Error: input file not found: $INPUT_FILE"
+    exit 1
   fi
-}
-
-if [[ "$FILE_MODE" -eq 1 ]]; then
-  phase_start "seed_query_from_file"
-  export INPUT_FILE
-  if [[ "$FILE_MODE_KIND" == "source" ]]; then
-    TEMP_DOC_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gpt-research-docs.XXXXXX")"
-    trap '[[ -n "${TEMP_DOC_DIR:-}" && -d "$TEMP_DOC_DIR" ]] && rm -rf "$TEMP_DOC_DIR"' EXIT
-    export TEMP_DOC_DIR
-    export HYBRID_DOC_MAX_CHARS="${HYBRID_DOC_MAX_CHARS:-45000}"
-    python - <<'PY'
-import os
-import re
+  INPUT_FILE="$(python3 - "$INPUT_FILE" <<'PY'
 from pathlib import Path
-
-source = Path(os.environ["INPUT_FILE"])
-target_dir = Path(os.environ["TEMP_DOC_DIR"])
-max_chars = int(os.getenv("HYBRID_DOC_MAX_CHARS", "45000"))
-
-text = source.read_text(encoding="utf-8", errors="replace")
-text = text.replace("\r\n", "\n")
-
-def compact_markdown(md: str, limit: int) -> str:
-    if len(md) <= limit:
-        return md
-
-    lines = md.splitlines()
-    selected = []
-
-    # Keep headings and short list-like statements as semantic anchors.
-    for ln in lines:
-        s = ln.strip()
-        if not s:
-            continue
-        if s.startswith("#") or s.startswith("- ") or s.startswith("* ") or re.match(r"^\d+\.\s+", s):
-            selected.append(s)
-        elif len(s) <= 180 and ":" in s:
-            selected.append(s)
-
-    compact = "\n".join(selected)
-    if len(compact) < 3000:
-        # Fallback: keep first part of the file if structure is sparse.
-        compact = md[:limit]
-    if len(compact) > limit:
-        compact = compact[:limit]
-    return compact
-
-compacted = compact_markdown(text, max_chars)
-
-target = target_dir / f"{source.stem}.md"
-target.write_text(compacted.strip() + "\n", encoding="utf-8")
-print(f"Hybrid local context prepared: {target} ({len(compacted)} chars)")
+import sys
+print(Path(sys.argv[1]).expanduser().resolve())
 PY
+)"
+fi
 
-    export DOC_PATH="$TEMP_DOC_DIR"
-  fi
-  export FILE_TASK FILE_MODE_KIND
+RAW_INPUT_FILE="$(mktemp "${TMPDIR:-/tmp}/gpt-research-raw-input.${RUN_ID}.XXXXXX")"
+PREFILTER_QUERY_FILE="$(mktemp "${TMPDIR:-/tmp}/gpt-research-query.${RUN_ID}.XXXXXX")"
+PREFILTER_BRIEF_FILE="$LOGS_DIR/${RUN_ID}-prefilter-brief.md"
+RAW_OUTPUT_FILE="$(mktemp "${TMPDIR:-/tmp}/gpt-research-raw.${RUN_ID}.XXXXXX")"
+trap '[[ -f "$RAW_INPUT_FILE" ]] && rm -f "$RAW_INPUT_FILE"; [[ -f "$PREFILTER_QUERY_FILE" ]] && rm -f "$PREFILTER_QUERY_FILE"; [[ -f "$RAW_OUTPUT_FILE" ]] && rm -f "$RAW_OUTPUT_FILE"' EXIT
 
-  echo "Preparing ${FILE_MODE_KIND} research query from: $INPUT_FILE"
-  export MAX_WEB_QUERY_CHARS="${MAX_WEB_QUERY_CHARS:-360}"
-  QUERY="$(python - <<'PY'
+if [[ -n "$INPUT_FILE" ]]; then
+  cat "$INPUT_FILE" > "$RAW_INPUT_FILE"
+else
+  printf '%s\n' "$QUERY_RAW" > "$RAW_INPUT_FILE"
+fi
+
+BEDROCK_MODEL_ID="${SMART_LLM#bedrock:}"
+python - <<'PY'
 import os
-import re
-from pathlib import Path
+import sys
 import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 
 region = os.getenv("AWS_DEFAULT_REGION") or os.getenv("AWS_REGION")
 model_id = os.getenv("SMART_LLM", "")
-if model_id.startswith("bedrock:"):
-    model_id = model_id.split(":", 1)[1]
+if not model_id.startswith("bedrock:"):
+    print("Error: SMART_LLM must start with 'bedrock:'")
+    sys.exit(1)
+model_id = model_id.split(":", 1)[1]
 
-source = Path(os.environ["INPUT_FILE"])
-content = source.read_text(encoding="utf-8", errors="replace")
-file_task = os.getenv("FILE_TASK", "").strip()
-mode = os.getenv("FILE_MODE_KIND", "query")
-max_chars = int(os.getenv("MAX_WEB_QUERY_CHARS", "520"))
-
-if mode == "source":
-    mode_note = (
-        "The task will be used as a web-search seed. The full markdown file "
-        "is loaded separately as local context via DOC_PATH, so do not restate the brief."
-    )
-else:
-    mode_note = (
-        "The markdown file is NOT loaded as local context. Build a compact but "
-        "self-sufficient web research task from the brief content."
-    )
-
-prompt = f"""
-Create a short English web-research task for GPT Researcher based on this markdown brief.
-
-{mode_note}
-
-Rules:
-- 180 to 320 characters;
-- one compact paragraph;
-- mention the core topic, target market, and evidence types to find;
-- include key terms that should guide search query generation;
-- no markdown headings, bullets, lists, or commentary;
-- do not include detailed background or long question lists;
-- preserve proper nouns and technical terms.
-
-Return only the final web-research task.
-
-Additional user instruction:
-{file_task or "Use the markdown brief itself as the research task."}
-
-Markdown brief:
-{content}
-"""
-
-client = boto3.client("bedrock-runtime", region_name=region)
-resp = client.converse(
-    modelId=model_id,
-    messages=[{"role": "user", "content": [{"text": prompt}]}],
-    inferenceConfig={"maxTokens": 350, "temperature": 0},
-)
-query = resp["output"]["message"]["content"][0]["text"].strip()
-query = re.sub(r"\s+", " ", query).strip()
-
-if len(query) > max_chars:
-    compress_prompt = (
-        f"Compress this web-research task to 180-{max_chars} characters. "
-        "Keep core topic, market, evidence types, and search terms. "
-        "Return one compact paragraph only.\n\n"
-        + query
-    )
-    resp = client.converse(
+try:
+    runtime = boto3.client("bedrock-runtime", region_name=region)
+    runtime.converse(
         modelId=model_id,
-        messages=[{"role": "user", "content": [{"text": compress_prompt}]}],
-        inferenceConfig={"maxTokens": 220, "temperature": 0},
+        messages=[{"role": "user", "content": [{"text": "ping"}]}],
+        inferenceConfig={"maxTokens": 1, "temperature": 0},
     )
-    query = resp["output"]["message"]["content"][0]["text"].strip()
-    query = re.sub(r"\s+", " ", query).strip()
-
-if len(query) > max_chars:
-    cut = query[:max_chars]
-    last_period = max(cut.rfind("."), cut.rfind(";"))
-    query = cut[:last_period + 1] if last_period > 180 else cut.rstrip()
-
-if len(query) < 80:
-    fallback = (file_task or source.stem).strip()
-    fallback = re.sub(r"\s+", " ", fallback)
-    if len(fallback) > max_chars:
-        fallback = fallback[:max_chars].rstrip()
-    query = fallback
-
-print(query)
+except ClientError as e:
+    code = e.response.get("Error", {}).get("Code", "Unknown")
+    msg = e.response.get("Error", {}).get("Message", str(e))
+    print(f"Bedrock check failed: {code} - {msg}")
+    sys.exit(2)
+except BotoCoreError as e:
+    print(f"Bedrock check failed: {e}")
+    sys.exit(2)
+except Exception as e:
+    print(f"Bedrock check failed: {e}")
+    sys.exit(2)
 PY
-)"
-  if [[ -z "$QUERY" ]]; then
-    phase_done "seed_query_from_file" "error_empty_query"
-    echo "Error: generated research query is empty"
-    exit 1
-  fi
-  echo "Generated web research seed:"
-  echo "$QUERY"
-  if [[ "$FILE_MODE_KIND" == "source" ]]; then
-    echo "Legacy source mode enabled: file is loaded into DOC_PATH."
-    echo "Hybrid DOC_PATH: $DOC_PATH"
-  else
-    echo "Query mode: markdown brief used only to build web query (DOC_PATH disabled)."
-  fi
-  phase_done "seed_query_from_file" "success"
+
+echo "Bedrock check passed for model: $BEDROCK_MODEL_ID"
+
+phase_start "prefilter"
+log_ts "prefilter_start input=$( [[ -n "$INPUT_FILE" ]] && echo file_as_query || echo inline_text )"
+python "$PREFILTER_SCRIPT" "$RAW_INPUT_FILE" "$PREFILTER_BRIEF_FILE" "$PREFILTER_QUERY_FILE" | tee -a "$RUN_LOG"
+
+QUERY="$(tr -d '\r' < "$PREFILTER_QUERY_FILE" | head -n 1 | sed 's/[[:space:]]\+$//')"
+if [[ -z "$QUERY" ]]; then
+  phase_done "prefilter" "error_empty_query"
+  echo "Error: prefilter produced empty query"
+  exit 1
 fi
+
+echo "Generated web research query:"
+echo "$QUERY"
+echo "Prefilter brief saved: $PREFILTER_BRIEF_FILE"
+phase_done "prefilter" "success"
 
 {
   echo "run_id=$RUN_ID"
   echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  echo "report_source=$REPORT_SOURCE"
-  echo "file_mode=${FILE_MODE}"
-  echo "file_mode_kind=${FILE_MODE_KIND}"
-  echo "verify_brief=${VERIFY_BRIEF}"
-  echo "translate_to_ru=$TRANSLATE_TO_RU"
+  echo "mode=web_only"
+  echo "report_source=web"
+  echo "input_mode=$( [[ -n "$INPUT_FILE" ]] && echo file_as_query || echo inline_text )"
   echo "input_file=${INPUT_FILE:-}"
-  echo "doc_path=${DOC_PATH:-}"
+  echo "prefilter_brief=$PREFILTER_BRIEF_FILE"
+  echo "web_timeout_seconds=$WEB_TIMEOUT_SECONDS"
+  echo "report_type=$REPORT_TYPE"
+  echo "deep_research_breadth=$DEEP_RESEARCH_BREADTH"
+  echo "deep_research_depth=$DEEP_RESEARCH_DEPTH"
+  echo "deep_research_concurrency=$DEEP_RESEARCH_CONCURRENCY"
+  echo "soft_limit_enabled=$SOFT_LIMIT_ENABLED"
+  echo "soft_limit_tavily_calls=$SOFT_LIMIT_TAVILY_CALLS"
+  echo "soft_limit_bedrock_total_tokens=$SOFT_LIMIT_BEDROCK_TOTAL_TOKENS"
+  echo "soft_limit_elapsed_seconds=$SOFT_LIMIT_ELAPSED_SECONDS"
+  echo "soft_limit_max_subqueries=$SOFT_LIMIT_MAX_SUBQUERIES"
   echo "query_chars=${#QUERY}"
-  echo "report_type=${REPORT_TYPE}"
-  echo "deep_research_breadth=${DEEP_RESEARCH_BREADTH}"
-  echo "deep_research_depth=${DEEP_RESEARCH_DEPTH}"
-  echo "deep_research_concurrency=${DEEP_RESEARCH_CONCURRENCY}"
   echo "query:"
   echo "$QUERY"
   echo
@@ -489,96 +259,21 @@ fi
 } >> "$RUN_LOG"
 echo "Run log: $RUN_LOG"
 
-RAW_OUTPUT_FILE="$(mktemp "${TMPDIR:-/tmp}/gpt-research-raw.${RUN_ID}.XXXXXX")"
-trap '[[ -n "${TEMP_DOC_DIR:-}" && -d "$TEMP_DOC_DIR" ]] && rm -rf "$TEMP_DOC_DIR"; [[ -n "${RAW_OUTPUT_FILE:-}" && -f "$RAW_OUTPUT_FILE" ]] && rm -f "$RAW_OUTPUT_FILE"' EXIT
-
 run_cli_with_timeout() {
-  local source="$1"
-  local timeout_sec="$2"
-  python - "$APP_DIR" "$QUERY" "$source" "$timeout_sec" "$RAW_OUTPUT_FILE" <<'PY'
-import subprocess
-import sys
-import os
-from pathlib import Path
-
-app_dir, query, source, timeout_sec, raw_file = sys.argv[1:]
-timeout_sec = int(timeout_sec)
-cmd = [
-    sys.executable, "cli.py", query,
-    "--report_type", os.environ.get("REPORT_TYPE", "deep"),
-    "--report_source", source,
-    "--no-pdf", "--no-docx",
-]
-try:
-    proc = subprocess.run(
-        cmd,
-        cwd=app_dir,
-        capture_output=True,
-        text=True,
-        timeout=timeout_sec,
-        env={**dict(), **__import__("os").environ, "PYTHONUNBUFFERED": "1"},
-    )
-    out = (proc.stdout or "") + (proc.stderr or "")
-    Path(raw_file).write_text(out, encoding="utf-8")
-    print(out, end="")
-    sys.exit(proc.returncode)
-except subprocess.TimeoutExpired as e:
-    def _norm(v):
-        if v is None:
-            return ""
-        if isinstance(v, bytes):
-            return v.decode("utf-8", errors="replace")
-        return v
-    out = _norm(e.stdout) + _norm(e.stderr)
-    Path(raw_file).write_text(out, encoding="utf-8")
-    if out:
-        print(out, end="")
-    print(f"\nError: CLI timed out after {timeout_sec}s for report_source={source}")
-    sys.exit(124)
-PY
+  local timeout_sec="$1"
+  python "$RUN_CLI_SCRIPT" "$APP_DIR" "$QUERY" "$timeout_sec" "$RAW_OUTPUT_FILE"
 }
 
-EXEC_SOURCE="$REPORT_SOURCE"
-RUN_EXIT=0
-
-if [[ "$REPORT_SOURCE" == "hybrid" ]]; then
-  phase_start "research_hybrid"
-  log_ts "hybrid_start timeout=${HYBRID_TIMEOUT_SECONDS}s"
-  if run_cli_with_timeout "hybrid" "$HYBRID_TIMEOUT_SECONDS"; then
-    RUN_EXIT=0
-    EXEC_SOURCE="hybrid"
-    log_ts "hybrid_success"
-    phase_done "research_hybrid" "success"
-  else
-    RUN_EXIT=$?
-    phase_done "research_hybrid" "$(exit_reason "$RUN_EXIT")"
-    log_ts "hybrid_failed exit_code=$RUN_EXIT fallback=web"
-    phase_start "research_web_fallback"
-    log_ts "web_fallback_start timeout=${WEB_TIMEOUT_SECONDS}s"
-    if run_cli_with_timeout "web" "$WEB_TIMEOUT_SECONDS"; then
-      RUN_EXIT=0
-      EXEC_SOURCE="web"
-      log_ts "web_fallback_success"
-      phase_done "research_web_fallback" "success"
-    else
-      RUN_EXIT=$?
-      log_ts "web_fallback_failed exit_code=$RUN_EXIT"
-      phase_done "research_web_fallback" "$(exit_reason "$RUN_EXIT")"
-    fi
-  fi
+phase_start "research_web"
+log_ts "web_start timeout=${WEB_TIMEOUT_SECONDS}s"
+if run_cli_with_timeout "$WEB_TIMEOUT_SECONDS"; then
+  RUN_EXIT=0
+  log_ts "web_success"
+  phase_done "research_web" "success"
 else
-  phase_start "research_web"
-  log_ts "web_start timeout=${WEB_TIMEOUT_SECONDS}s"
-  if run_cli_with_timeout "web" "$WEB_TIMEOUT_SECONDS"; then
-    RUN_EXIT=0
-    EXEC_SOURCE="web"
-    log_ts "web_success"
-    phase_done "research_web" "success"
-  else
-    RUN_EXIT=$?
-    log_ts "web_failed exit_code=$RUN_EXIT"
-    phase_done "research_web" "$(exit_reason "$RUN_EXIT")"
-  fi
+  RUN_EXIT=$?
+  log_ts "web_failed exit_code=$RUN_EXIT"
+  phase_done "research_web" "error_exit_${RUN_EXIT}"
 fi
 
 RAW_OUTPUT="$(cat "$RAW_OUTPUT_FILE")"
@@ -588,10 +283,8 @@ if [[ "$RUN_EXIT" -ne 0 ]]; then
   echo "Error: GPT Researcher execution failed"
   exit "$RUN_EXIT"
 fi
-echo "effective_report_source=$EXEC_SOURCE" >> "$RUN_LOG"
 
 REPORT_REL_PATH="$(printf '%s\n' "$RAW_OUTPUT" | sed -n "s/.*Report written to '\(outputs\/[^']*\.md\)'.*/\1/p" | tail -n 1)"
-
 if [[ -z "$REPORT_REL_PATH" ]]; then
   echo "Error: could not parse output markdown path from GPT Researcher logs"
   exit 1
@@ -602,6 +295,7 @@ if [[ ! -f "$SRC_REPORT" ]]; then
   echo "Error: generated report not found at $SRC_REPORT"
   exit 1
 fi
+
 echo "source_report=$SRC_REPORT" >> "$RUN_LOG"
 
 SLUG="$(python - "$QUERY" <<'PY'
@@ -612,418 +306,316 @@ slug = re.sub(r"[^\w]+", "-", q, flags=re.UNICODE).strip("-_")
 print((slug[:80] or "topic"))
 PY
 )"
-
 DATE_STR="$(date +%F)"
-BASE_REPORT_PATH="$REPORTS_DIR/${DATE_STR}-${SLUG}"
-if [[ "$FILE_MODE" -eq 1 ]]; then
-  FILE_STEM="$(basename "$INPUT_FILE")"
-  FILE_STEM="${FILE_STEM%.*}"
-  SLUG="$(python - "$FILE_STEM" <<'PY'
-import re
-import sys
-q = sys.argv[1].strip().lower()
-slug = re.sub(r"[^\w]+", "-", q, flags=re.UNICODE).strip("-_")
-print((slug[:80] or "topic"))
-PY
-)"
-  BASE_REPORT_PATH="$REPORTS_DIR/${DATE_STR}-${SLUG}"
-fi
+DEST_REPORT="$REPORTS_DIR/${DATE_STR}-${SLUG}.md"
 
 if [[ "$TRANSLATE_TO_RU" -eq 1 ]]; then
   phase_start "translation_ru"
   log_ts "translation_start mode=ru"
-  DEST_REPORT="${BASE_REPORT_PATH}.md"
-  export SRC_REPORT DEST_REPORT
-  python - <<'PY'
-import os
-import re
-import time
-from pathlib import Path
-import boto3
-from botocore.exceptions import ClientError, BotoCoreError
-
-region = os.getenv("AWS_DEFAULT_REGION") or os.getenv("AWS_REGION")
-model_id = os.getenv("SMART_LLM", "")
-if model_id.startswith("bedrock:"):
-    model_id = model_id.split(":", 1)[1]
-
-src = Path(os.environ["SRC_REPORT"])
-dst = Path(os.environ["DEST_REPORT"])
-content = src.read_text(encoding="utf-8")
-
-def split_markdown(text: str, max_chars: int = 6500) -> list[str]:
-    sections = re.split(r"(?m)(?=^#{1,3}\s+)", text)
-    chunks = []
-    current = ""
-    for section in sections:
-        if not section.strip():
-            continue
-        if current and len(current) + len(section) > max_chars:
-            chunks.append(current.rstrip())
-            current = section
-        else:
-            current += section
-    if current.strip():
-        chunks.append(current.rstrip())
-
-    compact_chunks = []
-    for chunk in chunks:
-        if len(chunk) <= max_chars:
-            compact_chunks.append(chunk)
-            continue
-        paragraphs = re.split(r"\n\s*\n", chunk)
-        current = ""
-        for paragraph in paragraphs:
-            candidate = f"{current}\n\n{paragraph}" if current else paragraph
-            if current and len(candidate) > max_chars:
-                compact_chunks.append(current.rstrip())
-                current = paragraph
-            else:
-                current = candidate
-        if current.strip():
-            compact_chunks.append(current.rstrip())
-    return compact_chunks
-
-def translate_chunk(client, chunk: str, index: int, total: int) -> str:
-    prompt = (
-        "Translate this markdown report section to Russian. "
-        "Keep markdown structure, headings, links, citations, tables, and formatting unchanged. "
-        "Preserve technical terms, product names, framework names, code identifiers, model names, URLs, and source titles in original form unless natural Russian spelling is standard. "
-        "Do not add comments, introductions, or extra sections. "
-        f"This is section {index} of {total}; translate only this section.\n\n"
-        + chunk
-    )
-    for attempt in range(1, 4):
-        try:
-            resp = client.converse(
-                modelId=model_id,
-                messages=[{"role": "user", "content": [{"text": prompt}]}],
-                inferenceConfig={"maxTokens": 5000, "temperature": 0},
-            )
-            return resp["output"]["message"]["content"][0]["text"].strip()
-        except (ClientError, BotoCoreError, Exception) as e:
-            if attempt == 3:
-                print(f"Warning: RU translation failed for section {index}/{total}: {e}")
-                return chunk
-            time.sleep(2 * attempt)
-
-try:
-    client = boto3.client("bedrock-runtime", region_name=region)
-    chunks = split_markdown(content)
-    print(f"Translating report to RU in {len(chunks)} section(s)...")
-    translated = []
-    for i, chunk in enumerate(chunks, start=1):
-        print(f"Translating section {i}/{len(chunks)}...")
-        translated.append(translate_chunk(client, chunk, i, len(chunks)))
-    ru_text = "\n\n".join(translated).strip() + "\n"
-    dst.write_text(ru_text, encoding="utf-8")
-    print(f"Saved report: {dst}")
-except (ClientError, BotoCoreError, Exception) as e:
-    print(f"Warning: RU translation failed: {e}")
-    dst.write_text(content, encoding="utf-8")
-    print(f"Saved report: {dst}")
-PY
+  python "$TRANSLATE_SCRIPT" "$SRC_REPORT" "$DEST_REPORT" | tee -a "$RUN_LOG"
   log_ts "translation_done"
   phase_done "translation_ru" "success"
 else
-  log_ts "translation_skip mode=en"
-  phase_done "translation_ru" "skipped_en"
-  DEST_REPORT="${BASE_REPORT_PATH}.md"
   cp "$SRC_REPORT" "$DEST_REPORT"
-  echo "Saved report: $DEST_REPORT"
+  log_ts "translation_skip mode=en"
 fi
 
-if [[ "$FILE_MODE" -eq 1 && "$VERIFY_BRIEF" -eq 1 ]]; then
-  phase_start "brief_verification"
-  log_ts "brief_verification_start mode=${FILE_MODE_KIND}"
-  export DEST_REPORT INPUT_FILE
-  export VERIFY_MAX_CLAIMS="${VERIFY_MAX_CLAIMS:-8}"
-  export VERIFY_MAX_RESULTS="${VERIFY_MAX_RESULTS:-5}"
-  if python - <<'PY'
-import json
-import os
-import re
-import urllib.error
-import urllib.request
+telemetry_json="$(python3 - "$RUN_LOG" "$RUN_ID" "$REPORT_TYPE" "$FAST_LLM" "$SMART_LLM" "$STRATEGIC_LLM" <<'PY'
+import json, re, sys
+from datetime import datetime, timezone
 from pathlib import Path
 
-import boto3
-from botocore.exceptions import BotoCoreError, ClientError
+log_path = Path(sys.argv[1])
+run_id = sys.argv[2]
+report_type = sys.argv[3]
+fast_llm = sys.argv[4]
+smart_llm = sys.argv[5]
+strategic_llm = sys.argv[6]
+text = log_path.read_text(encoding="utf-8", errors="replace")
 
-report_path = Path(os.environ["DEST_REPORT"])
-input_path = Path(os.environ["INPUT_FILE"])
-api_key = os.getenv("TAVILY_API_KEY", "").strip()
-max_claims = max(1, int(os.getenv("VERIFY_MAX_CLAIMS", "8")))
-max_results = max(1, min(10, int(os.getenv("VERIFY_MAX_RESULTS", "5"))))
-region = os.getenv("AWS_DEFAULT_REGION") or os.getenv("AWS_REGION")
-model_id = os.getenv("SMART_LLM", "")
-if model_id.startswith("bedrock:"):
-    model_id = model_id.split(":", 1)[1]
+def count(pattern: str) -> int:
+    return len(re.findall(pattern, text))
 
-if not report_path.exists():
-    print(f"Warning: report not found for verification: {report_path}")
-    raise SystemExit(0)
-if not input_path.exists():
-    print(f"Warning: input brief not found for verification: {input_path}")
-    raise SystemExit(0)
-if not api_key:
-    print("Warning: TAVILY_API_KEY missing; skipping brief verification")
-    raise SystemExit(0)
+def first_match(pattern: str, default: str = "") -> str:
+    m = re.search(pattern, text, re.M)
+    return m.group(1).strip() if m else default
 
-brief_text = input_path.read_text(encoding="utf-8", errors="replace").strip()
-if not brief_text:
-    print("Warning: empty brief file; skipping verification")
-    raise SystemExit(0)
+phase_re = re.compile(r"^(\d{4}-\d{2}-\d{2}T[^ ]+) phase_done name=([a-z_]+) duration_s=([0-9]+) reason=([^\n]+)$", re.M)
+phase_durations = {}
+for _, name, dur, reason in phase_re.findall(text):
+    phase_durations[name] = {"duration_s": int(dur), "reason": reason}
 
-client = boto3.client("bedrock-runtime", region_name=region)
+tel_lines = [line for line in text.splitlines() if line.startswith("TELEMETRY_JSON ")]
+bedrock = {
+    "calls": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_write_input_tokens": 0,
+    "estimated_cost_usd": 0.0,
+}
+bedrock_by_stage = {
+    "prefilter": {
+        "calls": 0, "input_tokens": 0, "output_tokens": 0,
+        "cache_read_input_tokens": 0, "cache_write_input_tokens": 0, "estimated_cost_usd": 0.0,
+    },
+    "research": {
+        "calls": 0, "input_tokens": 0, "output_tokens": 0,
+        "cache_read_input_tokens": 0, "cache_write_input_tokens": 0, "estimated_cost_usd": 0.0,
+    },
+    "translation": {
+        "calls": 0, "input_tokens": 0, "output_tokens": 0,
+        "cache_read_input_tokens": 0, "cache_write_input_tokens": 0, "estimated_cost_usd": 0.0,
+    },
+}
+tavily = {
+    "calls_dedup": 0,
+    "raw_events": 0,
+    "failed_calls": 0,
+    "estimated_credits": 0.0,
+}
+soft_limit = {"triggered": False, "reason": ""}
 
-def llm(prompt: str, max_tokens: int = 1800) -> str:
-    resp = client.converse(
-        modelId=model_id,
-        messages=[{"role": "user", "content": [{"text": prompt}]}],
-        inferenceConfig={"maxTokens": max_tokens, "temperature": 0},
+def bedrock_rate_card(model_name: str):
+    m = (model_name or "").lower()
+    if "opus" in m:
+        return {"input": 5.0, "output": 25.0, "cache_read": 0.5, "cache_write": 6.25}
+    if "haiku" in m:
+        return {"input": 0.8, "output": 4.0, "cache_read": 0.08, "cache_write": 1.0}
+    return {"input": 3.0, "output": 15.0, "cache_read": 0.3, "cache_write": 3.75}
+
+def estimate_bedrock_usage_cost(model_name: str, usage: dict) -> float:
+    r = bedrock_rate_card(model_name)
+    inp = float(usage.get("inputTokens", usage.get("input_tokens", 0)) or 0)
+    out = float(usage.get("outputTokens", usage.get("output_tokens", 0)) or 0)
+    cr = float(
+        usage.get(
+            "cacheReadInputTokens",
+            usage.get("cache_read_input_tokens", usage.get("input_token_details", {}).get("cache_read", 0)),
+        )
+        or 0
     )
-    return resp["output"]["message"]["content"][0]["text"].strip()
+    cw = float(
+        usage.get(
+            "cacheWriteInputTokens",
+            usage.get("cache_write_input_tokens", usage.get("input_token_details", {}).get("cache_creation", 0)),
+        )
+        or 0
+    )
+    return (
+        (inp * r["input"])
+        + (out * r["output"])
+        + (cr * r["cache_read"])
+        + (cw * r["cache_write"])
+    ) / 1_000_000.0
 
-def parse_json_from_text(text: str):
+for raw in tel_lines:
+    payload = raw[len("TELEMETRY_JSON "):]
     try:
-        return json.loads(text)
+        item = json.loads(payload)
     except Exception:
-        pass
-    match = re.search(r"(\{.*\}|\[.*\])", text, flags=re.S)
-    if match:
-        try:
-            return json.loads(match.group(1))
-        except Exception:
-            return None
-    return None
-
-def extract_claims(text: str):
-    prompt = f"""
-Extract up to {max_claims} factual claims from this markdown brief.
-
-Rules:
-- Return strict JSON array only: [{{"claim":"..."}}]
-- Include only claims that can be checked against external web sources.
-- Ignore preferences, style notes, and questions.
-- Keep each claim concise and specific.
-
-Markdown brief:
-{text}
-"""
-    raw = llm(prompt, max_tokens=1200)
-    payload = parse_json_from_text(raw)
-    claims = []
-    if isinstance(payload, list):
-        for item in payload:
-            if isinstance(item, dict):
-                claim = str(item.get("claim", "")).strip()
-            else:
-                claim = str(item).strip()
-            if claim:
-                claims.append(claim)
-    deduped = []
-    seen = set()
-    for claim in claims:
-        key = re.sub(r"\s+", " ", claim).strip().lower()
-        if key and key not in seen:
-            seen.add(key)
-            deduped.append(claim)
-    return deduped[:max_claims]
-
-def tavily_search(query: str):
-    body = json.dumps(
-        {
-            "query": query,
-            "search_depth": "basic",
-            "max_results": max_results,
-            "include_answer": False,
-            "include_raw_content": False,
-        }
-    ).encode("utf-8")
-    req = urllib.request.Request(
-        "https://api.tavily.com/search",
-        data=body,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=40) as resp:
-        data = json.loads(resp.read().decode("utf-8", errors="replace"))
-    return data.get("results") or []
-
-def evaluate_claim(claim: str, results: list[dict]):
-    evidence_chunks = []
-    cleaned_results = []
-    for idx, result in enumerate(results, start=1):
-        url = str(result.get("url") or result.get("href") or "").strip()
-        title = str(result.get("title") or "").strip()
-        snippet = str(result.get("content") or result.get("body") or "").strip()
-        if not url:
-            continue
-        cleaned_results.append({"url": url, "title": title, "snippet": snippet})
-        evidence_chunks.append(
-            f"[{idx}] URL: {url}\nTitle: {title or 'n/a'}\nSnippet: {snippet[:700] or 'n/a'}"
-        )
-
-    if not cleaned_results:
-        return {
-            "status": "unverified",
-            "note": "No external evidence was retrieved for this claim.",
-            "evidence_url": "n/a",
-        }
-
-    prompt = f"""
-Fact-check exactly one claim using only the external evidence snippets below.
-
-Claim:
-{claim}
-
-External evidence:
-{chr(10).join(evidence_chunks)}
-
-Rules:
-- The brief itself is NOT evidence.
-- Use only snippets and URLs above.
-- status=verified: evidence clearly supports claim, no major contradiction.
-- status=conflicting: evidence contradicts claim or gives mixed signals.
-- status=unverified: evidence is insufficient to confirm or deny.
-
-Return strict JSON only:
-{{
-  "status": "verified|conflicting|unverified",
-  "note": "short reason",
-  "evidence_index": <number or null>
-}}
-"""
-    raw = llm(prompt, max_tokens=700)
-    payload = parse_json_from_text(raw)
-    status = "unverified"
-    note = "Insufficient external evidence."
-    evidence_url = "n/a"
-    if isinstance(payload, dict):
-        cand_status = str(payload.get("status", "")).strip().lower()
-        if cand_status in {"verified", "conflicting", "unverified"}:
-            status = cand_status
-        cand_note = str(payload.get("note", "")).strip()
-        if cand_note:
-            note = cand_note
-        index = payload.get("evidence_index")
-        if isinstance(index, int) and 1 <= index <= len(cleaned_results):
-            evidence_url = cleaned_results[index - 1]["url"]
-    if evidence_url == "n/a":
-        evidence_url = cleaned_results[0]["url"]
-    return {"status": status, "note": note, "evidence_url": evidence_url}
-
-def esc_cell(value: str) -> str:
-    text = str(value or "").replace("\n", " ").replace("\r", " ").strip()
-    text = re.sub(r"\s+", " ", text)
-    return text.replace("|", "\\|")
-
-rows = []
-try:
-    claims = extract_claims(brief_text)
-except (ClientError, BotoCoreError, Exception) as e:
-    claims = []
-    rows.append(
-        {
-            "claim": "n/a",
-            "status": "unverified",
-            "url": "n/a",
-            "note": f"Claim extraction failed: {e}",
-        }
-    )
-
-for claim in claims:
-    try:
-        results = tavily_search(claim)
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, Exception) as e:
-        rows.append(
-            {
-                "claim": claim,
-                "status": "unverified",
-                "url": "n/a",
-                "note": f"Search error: {e}",
-            }
-        )
         continue
-    try:
-        verdict = evaluate_claim(claim, results)
-    except (ClientError, BotoCoreError, Exception) as e:
-        verdict = {
-            "status": "unverified",
-            "note": f"Evaluation error: {e}",
-            "evidence_url": (results[0].get("url") if results else "n/a"),
-        }
-    rows.append(
-        {
-            "claim": claim,
-            "status": verdict["status"],
-            "url": verdict["evidence_url"],
-            "note": verdict["note"],
-        }
-    )
+    typ = item.get("type")
+    if typ == "bedrock_usage":
+        usage = item.get("usage", {}) or {}
+        inp = int(usage.get("inputTokens", usage.get("input_tokens", 0)) or 0)
+        out = int(usage.get("outputTokens", usage.get("output_tokens", 0)) or 0)
+        cr = int(
+            usage.get(
+                "cacheReadInputTokens",
+                usage.get("cache_read_input_tokens", usage.get("input_token_details", {}).get("cache_read", 0)),
+            )
+            or 0
+        )
+        cw = int(
+            usage.get(
+                "cacheWriteInputTokens",
+                usage.get("cache_write_input_tokens", usage.get("input_token_details", {}).get("cache_creation", 0)),
+            )
+            or 0
+        )
+        bedrock["calls"] += 1
+        bedrock["input_tokens"] += inp
+        bedrock["output_tokens"] += out
+        bedrock["cache_read_input_tokens"] += cr
+        bedrock["cache_write_input_tokens"] += cw
+        event_cost = float(item.get("estimated_cost_usd", 0.0) or 0.0)
+        if event_cost <= 0:
+            event_cost = estimate_bedrock_usage_cost(item.get("model", ""), usage)
+        bedrock["estimated_cost_usd"] += event_cost
+    elif typ in ("prefilter_bedrock", "translation_bedrock"):
+        usage = item.get("usage", {}) or {}
+        model_name = item.get("model", "")
+        inp = int(usage.get("inputTokens", usage.get("input_tokens", 0)) or 0)
+        out = int(usage.get("outputTokens", usage.get("output_tokens", 0)) or 0)
+        cr = int(
+            usage.get(
+                "cacheReadInputTokens",
+                usage.get("cache_read_input_tokens", usage.get("input_token_details", {}).get("cache_read", 0)),
+            )
+            or 0
+        )
+        cw = int(
+            usage.get(
+                "cacheWriteInputTokens",
+                usage.get("cache_write_input_tokens", usage.get("input_token_details", {}).get("cache_creation", 0)),
+            )
+            or 0
+        )
+        bedrock["calls"] += 1
+        bedrock["input_tokens"] += inp
+        bedrock["output_tokens"] += out
+        bedrock["cache_read_input_tokens"] += cr
+        bedrock["cache_write_input_tokens"] += cw
+        c = estimate_bedrock_usage_cost(model_name, usage)
+        bedrock["estimated_cost_usd"] += c
+        stage_key = "prefilter" if typ == "prefilter_bedrock" else "translation"
+        stage = bedrock_by_stage[stage_key]
+        stage["calls"] += 1
+        stage["input_tokens"] += int(usage.get("inputTokens", 0) or 0)
+        stage["output_tokens"] += int(usage.get("outputTokens", 0) or 0)
+        stage["cache_read_input_tokens"] += int(usage.get("cacheReadInputTokens", 0) or 0)
+        stage["cache_write_input_tokens"] += int(usage.get("cacheWriteInputTokens", 0) or 0)
+        stage["estimated_cost_usd"] += c
+    elif typ == "bedrock_usage_step":
+        step_name = str(item.get("step", "research"))
+        if step_name in ("agent_selection", "research", "report_writing", "deep_research"):
+            usage = item.get("usage", {}) or {}
+            inp = int(usage.get("inputTokens", usage.get("input_tokens", 0)) or 0)
+            out = int(usage.get("outputTokens", usage.get("output_tokens", 0)) or 0)
+            cr = int(
+                usage.get(
+                    "cacheReadInputTokens",
+                    usage.get("cache_read_input_tokens", usage.get("input_token_details", {}).get("cache_read", 0)),
+                )
+                or 0
+            )
+            cw = int(
+                usage.get(
+                    "cacheWriteInputTokens",
+                    usage.get("cache_write_input_tokens", usage.get("input_token_details", {}).get("cache_creation", 0)),
+                )
+                or 0
+            )
+            stage = bedrock_by_stage["research"]
+            stage["calls"] += 1
+            stage["input_tokens"] += inp
+            stage["output_tokens"] += out
+            stage["cache_read_input_tokens"] += cr
+            stage["cache_write_input_tokens"] += cw
+            stage["estimated_cost_usd"] += float(item.get("estimated_cost_usd", 0.0) or 0.0)
+    elif typ == "tavily_usage":
+        tavily["raw_events"] += 1
+        # Keep only canonical events from agent runtime and ignore duplicate usage-only events.
+        is_canonical = ("success" in item) or ("totals" in item)
+        if not is_canonical:
+            continue
+        tavily["calls_dedup"] += 1
+        if item.get("success") is False:
+            tavily["failed_calls"] += 1
+        usage = item.get("usage", {}) or {}
+        req_credits = None
+        for credit_key in ("credits_used", "request_credits", "total_credits", "credits"):
+            val = usage.get(credit_key)
+            if isinstance(val, (int, float)):
+                req_credits = float(val)
+                break
+        if req_credits is not None and req_credits > 0:
+            tavily["estimated_credits"] += req_credits
+    elif typ == "soft_limit_triggered":
+        soft_limit["triggered"] = True
+        soft_limit["reason"] = item.get("reason", "")
 
-if not rows:
-    rows.append(
-        {
-            "claim": "n/a",
-            "status": "unverified",
-            "url": "n/a",
-            "note": "No factual claims were extracted from the brief.",
-        }
-    )
+tavily["calls"] = tavily["calls_dedup"]
+pre_filter_usage_calls = count(r'"type": "prefilter_bedrock"')
+translation_calls = count(r'"type": "translation_bedrock"')
 
-section = [
-    "## Brief Claim Verification",
-    "",
-    "_External URLs are the only evidence source; brief text is not treated as evidence._",
-    "",
-    "| Claim | Status | Evidence URL | Note |",
-    "|---|---|---|---|",
-]
-for row in rows:
-    section.append(
-        "| "
-        + esc_cell(row["claim"])
-        + " | "
-        + esc_cell(row["status"])
-        + " | "
-        + esc_cell(row["url"])
-        + " | "
-        + esc_cell(row["note"])
-        + " |"
-    )
-
-report_text = report_path.read_text(encoding="utf-8", errors="replace").rstrip()
-section_text = "\n".join(section).rstrip()
-if "## Brief Claim Verification" in report_text:
-    report_text = re.sub(
-        r"\n## Brief Claim Verification[\s\S]*$",
-        "",
-        report_text,
-        flags=re.M,
-    ).rstrip()
-
-report_path.write_text(report_text + "\n\n" + section_text + "\n", encoding="utf-8")
-print(f"Brief verification rows: {len(rows)}")
+meta = {
+    "run_id": run_id,
+    "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+    "report_type": report_type,
+    "models": {
+        "fast": fast_llm,
+        "smart": smart_llm,
+        "strategic": strategic_llm,
+    },
+    "run_params": {
+        "mode": first_match(r"^mode=(.*)$"),
+        "report_source": first_match(r"^report_source=(.*)$"),
+        "input_mode": first_match(r"^input_mode=(.*)$"),
+        "input_file": first_match(r"^input_file=(.*)$"),
+        "report_type": first_match(r"^report_type=(.*)$", report_type),
+        "web_timeout_seconds": first_match(r"^web_timeout_seconds=(.*)$"),
+        "soft_limit_enabled": first_match(r"^soft_limit_enabled=(.*)$"),
+        "soft_limit_tavily_calls": first_match(r"^soft_limit_tavily_calls=(.*)$"),
+        "soft_limit_bedrock_total_tokens": first_match(r"^soft_limit_bedrock_total_tokens=(.*)$"),
+        "soft_limit_elapsed_seconds": first_match(r"^soft_limit_elapsed_seconds=(.*)$"),
+        "soft_limit_max_subqueries": first_match(r"^soft_limit_max_subqueries=(.*)$"),
+    },
+    "counts": {
+        "planning_web_passes": count(r"🌐 Browsing the web to learn more about the task:"),
+        "running_subqueries": count(r"🔍 Running research for '"),
+        "source_urls_added": count(r"✅ Added source url to research:"),
+        "throttling_errors": count(r"ThrottlingException"),
+    },
+    "phases": phase_durations,
+    "bedrock": bedrock,
+    "bedrock_by_stage": bedrock_by_stage,
+    "tavily": tavily,
+    "soft_limit": soft_limit,
+    "stage_calls": {
+        "prefilter_calls": pre_filter_usage_calls,
+        "translation_calls": translation_calls,
+    },
+}
+print(json.dumps(meta, ensure_ascii=False))
 PY
-  then
-    log_ts "brief_verification_done"
-    phase_done "brief_verification" "success"
-  else
-    verify_exit=$?
-    log_ts "brief_verification_failed exit_code=${verify_exit}"
-    phase_done "brief_verification" "$(exit_reason "$verify_exit")"
-  fi
-elif [[ "$FILE_MODE" -eq 1 ]]; then
-  phase_done "brief_verification" "skipped_disabled"
-fi
+)"
 
-{
-  echo "saved_report=$DEST_REPORT"
-  echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-} >> "$RUN_LOG"
+telemetry_md="$(python3 - "$telemetry_json" <<'PY'
+import json, sys
+t = json.loads(sys.argv[1])
+phases = t.get("phases", {})
+bed = t.get("bedrock", {})
+tav = t.get("tavily", {})
+params = t.get("run_params", {})
+cnt = t.get("counts", {})
+soft = t.get("soft_limit", {})
+stage_calls = t.get("stage_calls", {})
+stage_bedrock = t.get("bedrock_by_stage", {})
+
+def d(name):
+    return phases.get(name, {}).get("duration_s", 0)
+
+lines = []
+lines.append("## Run telemetry")
+lines.append("")
+lines.append(f"- Run ID: `{t.get('run_id','')}`")
+lines.append(f"- Generated at (UTC): `{t.get('generated_at_utc','')}`")
+lines.append(f"- Report type: `{t.get('report_type','')}`")
+lines.append(f"- Models: FAST `{t['models']['fast']}`, SMART `{t['models']['smart']}`, STRATEGIC `{t['models']['strategic']}`")
+lines.append(f"- Duration by phase (s): prefilter `{d('prefilter')}`, research_web `{d('research_web')}`, translation_ru `{d('translation_ru')}`")
+lines.append(
+    f"- Run params: report_source `{params.get('report_source','')}`, report_type `{params.get('report_type','')}`, input_mode `{params.get('input_mode','')}`, web_timeout_seconds `{params.get('web_timeout_seconds','')}`, soft_limit_enabled `{params.get('soft_limit_enabled','')}`, soft_limit_tavily_calls `{params.get('soft_limit_tavily_calls','')}`, soft_limit_bedrock_total_tokens `{params.get('soft_limit_bedrock_total_tokens','')}`, soft_limit_elapsed_seconds `{params.get('soft_limit_elapsed_seconds','')}`, soft_limit_max_subqueries `{params.get('soft_limit_max_subqueries','')}`"
+)
+lines.append(f"- Bedrock calls/tokens: calls `{bed.get('calls',0)}`, input `{bed.get('input_tokens',0)}`, output `{bed.get('output_tokens',0)}`, cache_read `{bed.get('cache_read_input_tokens',0)}`, cache_write `{bed.get('cache_write_input_tokens',0)}`")
+lines.append(f"- Bedrock estimated cost (USD): `${bed.get('estimated_cost_usd',0.0):.6f}`")
+lines.append(f"- Tavily usage: calls_dedup `{tav.get('calls_dedup', tav.get('calls',0))}`, failed `{tav.get('failed_calls',0)}`, estimated_credits `{tav.get('estimated_credits',0.0):.2f}`, raw_events `{tav.get('raw_events',0)}`")
+lines.append(f"- Research activity: planning_web_passes `{cnt.get('planning_web_passes',0)}`, running_subqueries `{cnt.get('running_subqueries',0)}`, source_urls_added `{cnt.get('source_urls_added',0)}`, throttling_errors `{cnt.get('throttling_errors',0)}`")
+for stage_name in ("prefilter", "research", "translation"):
+    s = stage_bedrock.get(stage_name, {})
+    lines.append(
+        f"- Bedrock {stage_name}: calls `{s.get('calls',0)}`, input `{s.get('input_tokens',0)}`, output `{s.get('output_tokens',0)}`, cache_read `{s.get('cache_read_input_tokens',0)}`, cache_write `{s.get('cache_write_input_tokens',0)}`, est_cost `${s.get('estimated_cost_usd',0.0):.6f}`"
+    )
+lines.append(f"- Stage Bedrock call counters: prefilter `{stage_calls.get('prefilter_calls',0)}`, translation `{stage_calls.get('translation_calls',0)}`")
+lines.append(f"- Soft limit: triggered `{str(soft.get('triggered', False)).lower()}`" + (f", reason `{soft.get('reason','')}`" if soft.get("reason") else ""))
+print("\n".join(lines))
+PY
+)"
+
+printf "\n\n%s\n" "$telemetry_md" >> "$DEST_REPORT"
+printf "%s\n" "$telemetry_json" > "$LOGS_DIR/${RUN_ID}-telemetry.json"
+echo "Saved telemetry: $LOGS_DIR/${RUN_ID}-telemetry.json"
+
 echo "Saved log: $RUN_LOG"
+echo "Saved report: $DEST_REPORT"
