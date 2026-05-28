@@ -370,7 +370,6 @@ bedrock_by_stage = {
 }
 tavily = {
     "calls_dedup": 0,
-    "raw_events": 0,
     "failed_calls": 0,
     "estimated_credits": 0.0,
 }
@@ -505,7 +504,6 @@ for raw in tel_lines:
             stage["cache_write_input_tokens"] += cw
             stage["estimated_cost_usd"] += float(item.get("estimated_cost_usd", 0.0) or 0.0)
     elif typ == "tavily_usage":
-        tavily["raw_events"] += 1
         # Keep only canonical events from agent runtime and ignore duplicate usage-only events.
         is_canonical = ("success" in item) or ("totals" in item)
         if not is_canonical:
@@ -600,7 +598,7 @@ lines.append(
 )
 lines.append(f"- Bedrock calls/tokens: calls `{bed.get('calls',0)}`, input `{bed.get('input_tokens',0)}`, output `{bed.get('output_tokens',0)}`, cache_read `{bed.get('cache_read_input_tokens',0)}`, cache_write `{bed.get('cache_write_input_tokens',0)}`")
 lines.append(f"- Bedrock estimated cost (USD): `${bed.get('estimated_cost_usd',0.0):.6f}`")
-lines.append(f"- Tavily usage: calls_dedup `{tav.get('calls_dedup', tav.get('calls',0))}`, failed `{tav.get('failed_calls',0)}`, estimated_credits `{tav.get('estimated_credits',0.0):.2f}`, raw_events `{tav.get('raw_events',0)}`")
+lines.append(f"- Tavily usage: calls_dedup `{tav.get('calls_dedup', tav.get('calls',0))}`, failed `{tav.get('failed_calls',0)}`, estimated_credits `{tav.get('estimated_credits',0.0):.2f}`")
 lines.append(f"- Research activity: planning_web_passes `{cnt.get('planning_web_passes',0)}`, running_subqueries `{cnt.get('running_subqueries',0)}`, source_urls_added `{cnt.get('source_urls_added',0)}`, throttling_errors `{cnt.get('throttling_errors',0)}`")
 for stage_name in ("prefilter", "research", "translation"):
     s = stage_bedrock.get(stage_name, {})
