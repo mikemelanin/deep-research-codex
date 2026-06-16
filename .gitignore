@@ -5,8 +5,19 @@
 .venv/
 
 # generated artifacts
+logs/
+outputs/
 reports/
 *.log
+
+# Python/runtime caches
+__pycache__/
+*.py[cod]
+
+# local locks and macOS metadata
+.research.lock.d/
+.research.lock.meta
+.DS_Store
 
 # upstream cloned app repo (managed separately)
 gpt-researcher/

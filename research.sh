@@ -10,9 +10,13 @@ SCRIPTS_DIR="$ROOT_DIR/scripts"
 PREFILTER_SCRIPT="$SCRIPTS_DIR/prefilter_query.py"
 RUN_CLI_SCRIPT="$SCRIPTS_DIR/run_research_cli.py"
 TRANSLATE_SCRIPT="$SCRIPTS_DIR/translate_report_ru.py"
+LOCK_DIR="$ROOT_DIR/.research.lock.d"
+LOCK_META_FILE="$ROOT_DIR/.research.lock.meta"
 
 print_usage() {
-  echo "Usage: ./research.sh [--ru|--en] [--file /path/input.txt|.md] \"/path/notes.md\" | \"topic or raw dump\""
+  echo "Usage: ./research.sh [--ru] [--yes|--no-confirm|--confirm] [--prefilter-only] [--from-prefilter /path/prefilter.json] [--file /path/input.txt|.md] \"/path/notes.md\" | \"topic or raw dump\""
+  echo "Default: deep research with an English final report. Use `--ru` to translate the final report to Russian."
+  echo "Legacy compatibility: `--deep`, `--en`, and `--no-translate` are still accepted."
 }
 
 if [[ $# -lt 1 ]]; then
@@ -20,8 +24,13 @@ if [[ $# -lt 1 ]]; then
   exit 1
 fi
 
-TRANSLATE_TO_RU=1
+TRANSLATE_TO_RU=0
+LEGACY_LANGUAGE_FLAG=""
+CONFIRM_BEFORE_RESEARCH=auto
+PREFILTER_ONLY=0
+FROM_PREFILTER=""
 INPUT_FILE=""
+DEEP_MODE=1
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --ru)
@@ -29,8 +38,40 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --en)
+      LEGACY_LANGUAGE_FLAG="--en"
       TRANSLATE_TO_RU=0
       shift
+      ;;
+    --no-translate)
+      LEGACY_LANGUAGE_FLAG="--no-translate"
+      TRANSLATE_TO_RU=0
+      shift
+      ;;
+    --yes|--no-confirm)
+      CONFIRM_BEFORE_RESEARCH=no
+      shift
+      ;;
+    --confirm)
+      CONFIRM_BEFORE_RESEARCH=yes
+      shift
+      ;;
+    --prefilter-only)
+      PREFILTER_ONLY=1
+      CONFIRM_BEFORE_RESEARCH=no
+      shift
+      ;;
+    --deep)
+      DEEP_MODE=1
+      shift
+      ;;
+    --from-prefilter)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --from-prefilter requires a path"
+        exit 1
+      fi
+      FROM_PREFILTER="$2"
+      CONFIRM_BEFORE_RESEARCH=no
+      shift 2
       ;;
     --file)
       if [[ $# -lt 2 ]]; then
@@ -55,11 +96,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 QUERY_RAW="$*"
+if [[ -n "$FROM_PREFILTER" && ( -n "$INPUT_FILE" || -n "$QUERY_RAW" ) ]]; then
+  echo "Error: --from-prefilter cannot be combined with a new query or --file"
+  exit 1
+fi
 if [[ -z "$INPUT_FILE" && "$#" -eq 1 && -f "$1" && "$1" == *.md ]]; then
   INPUT_FILE="$1"
   QUERY_RAW=""
 fi
-if [[ -z "$INPUT_FILE" && -z "$QUERY_RAW" ]]; then
+if [[ -z "$FROM_PREFILTER" && -z "$INPUT_FILE" && -z "$QUERY_RAW" ]]; then
   print_usage
   exit 1
 fi
@@ -115,16 +160,55 @@ if [[ -z "${AWS_DEFAULT_REGION:-}" && -z "${AWS_REGION:-}" ]]; then
   exit 1
 fi
 
-REPORT_TYPE="${REPORT_TYPE:-research_report}"
-DEEP_RESEARCH_BREADTH="${DEEP_RESEARCH_BREADTH:-4}"
-DEEP_RESEARCH_DEPTH="${DEEP_RESEARCH_DEPTH:-2}"
-DEEP_RESEARCH_CONCURRENCY="${DEEP_RESEARCH_CONCURRENCY:-4}"
+ENV_REPORT_TYPE="${REPORT_TYPE:-}"
+ENV_DEEP_RESEARCH_BREADTH="${DEEP_RESEARCH_BREADTH:-}"
+ENV_DEEP_RESEARCH_DEPTH="${DEEP_RESEARCH_DEPTH:-}"
+ENV_DEEP_RESEARCH_CONCURRENCY="${DEEP_RESEARCH_CONCURRENCY:-}"
+ENV_SOFT_LIMIT_ENABLED="${SOFT_LIMIT_ENABLED:-}"
+ENV_SOFT_LIMIT_TAVILY_CALLS="${SOFT_LIMIT_TAVILY_CALLS:-}"
+ENV_SOFT_LIMIT_BEDROCK_TOTAL_TOKENS="${SOFT_LIMIT_BEDROCK_TOTAL_TOKENS:-}"
+ENV_SOFT_LIMIT_ELAPSED_SECONDS="${SOFT_LIMIT_ELAPSED_SECONDS:-}"
+ENV_SOFT_LIMIT_MAX_SUBQUERIES="${SOFT_LIMIT_MAX_SUBQUERIES:-}"
+
+REPORT_TYPE="${ENV_REPORT_TYPE:-research_report}"
+DEEP_RESEARCH_BREADTH="${ENV_DEEP_RESEARCH_BREADTH:-4}"
+DEEP_RESEARCH_DEPTH="${ENV_DEEP_RESEARCH_DEPTH:-2}"
+DEEP_RESEARCH_CONCURRENCY="${ENV_DEEP_RESEARCH_CONCURRENCY:-4}"
 WEB_TIMEOUT_SECONDS="${WEB_TIMEOUT_SECONDS:-1200}"
-SOFT_LIMIT_ENABLED="${SOFT_LIMIT_ENABLED:-1}"
-SOFT_LIMIT_TAVILY_CALLS="${SOFT_LIMIT_TAVILY_CALLS:-25}"
-SOFT_LIMIT_BEDROCK_TOTAL_TOKENS="${SOFT_LIMIT_BEDROCK_TOTAL_TOKENS:-300000}"
-SOFT_LIMIT_ELAPSED_SECONDS="${SOFT_LIMIT_ELAPSED_SECONDS:-600}"
-SOFT_LIMIT_MAX_SUBQUERIES="${SOFT_LIMIT_MAX_SUBQUERIES:-12}"
+SOFT_LIMIT_ENABLED="${ENV_SOFT_LIMIT_ENABLED:-1}"
+SOFT_LIMIT_TAVILY_CALLS="${ENV_SOFT_LIMIT_TAVILY_CALLS:-25}"
+SOFT_LIMIT_BEDROCK_TOTAL_TOKENS="${ENV_SOFT_LIMIT_BEDROCK_TOTAL_TOKENS:-300000}"
+SOFT_LIMIT_ELAPSED_SECONDS="${ENV_SOFT_LIMIT_ELAPSED_SECONDS:-600}"
+SOFT_LIMIT_MAX_SUBQUERIES="${ENV_SOFT_LIMIT_MAX_SUBQUERIES:-12}"
+
+if [[ "$DEEP_MODE" -eq 1 ]]; then
+  REPORT_TYPE="deep"
+
+  # Default deep profile chosen from local comparison runs:
+  # wider first pass outperformed extra recursion on the same topic.
+  if [[ -z "$ENV_DEEP_RESEARCH_BREADTH" ]]; then
+    DEEP_RESEARCH_BREADTH=4
+  fi
+  if [[ -z "$ENV_DEEP_RESEARCH_DEPTH" ]]; then
+    DEEP_RESEARCH_DEPTH=2
+  fi
+  if [[ -z "$ENV_DEEP_RESEARCH_CONCURRENCY" ]]; then
+    DEEP_RESEARCH_CONCURRENCY=4
+  fi
+  if [[ -z "$ENV_SOFT_LIMIT_TAVILY_CALLS" ]]; then
+    SOFT_LIMIT_TAVILY_CALLS=14
+  fi
+  if [[ -z "$ENV_SOFT_LIMIT_BEDROCK_TOTAL_TOKENS" ]]; then
+    SOFT_LIMIT_BEDROCK_TOTAL_TOKENS=160000
+  fi
+  if [[ -z "$ENV_SOFT_LIMIT_ELAPSED_SECONDS" ]]; then
+    SOFT_LIMIT_ELAPSED_SECONDS=540
+  fi
+  if [[ -z "$ENV_SOFT_LIMIT_MAX_SUBQUERIES" ]]; then
+    SOFT_LIMIT_MAX_SUBQUERIES=8
+  fi
+fi
+
 RUN_STARTED_AT_EPOCH="$(date +%s)"
 export REPORT_TYPE DEEP_RESEARCH_BREADTH DEEP_RESEARCH_DEPTH DEEP_RESEARCH_CONCURRENCY
 export SOFT_LIMIT_ENABLED SOFT_LIMIT_TAVILY_CALLS SOFT_LIMIT_BEDROCK_TOTAL_TOKENS SOFT_LIMIT_ELAPSED_SECONDS SOFT_LIMIT_MAX_SUBQUERIES RUN_STARTED_AT_EPOCH
@@ -133,8 +217,97 @@ mkdir -p "$REPORTS_DIR" "$LOGS_DIR"
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 RUN_LOG="$LOGS_DIR/${RUN_ID}-research.log"
 
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  if [[ -f "$LOCK_META_FILE" ]]; then
+    echo "Error: another research run is already in progress."
+    cat "$LOCK_META_FILE"
+  else
+    echo "Error: another research run is already in progress."
+  fi
+  exit 16
+fi
+
+cleanup_lock_meta() {
+  rm -rf "$LOCK_DIR"
+  rm -f "$LOCK_META_FILE"
+}
+trap cleanup_lock_meta EXIT
+
 log_ts() {
   printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" | tee -a "$RUN_LOG"
+}
+
+write_prefilter_artifact() {
+  local artifact_path="$1"
+  local input_mode="$2"
+  local input_file="$3"
+  python3 - "$artifact_path" "$RUN_ID" "$RUN_LOG" "$PREFILTER_BRIEF_FILE" "$PREFILTER_QUERY_FILE" "$QUERY" "$input_mode" "$input_file" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+artifact_path = Path(sys.argv[1])
+payload = {
+    "version": 1,
+    "prefilter_run_id": sys.argv[2],
+    "created_at_utc": datetime.now(timezone.utc).isoformat(),
+    "prefilter_log_path": sys.argv[3],
+    "brief_path": sys.argv[4],
+    "query_path": sys.argv[5],
+    "normalized_query": sys.argv[6],
+    "input_mode": sys.argv[7],
+    "input_file": sys.argv[8],
+}
+artifact_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
+}
+
+load_prefilter_artifact() {
+  local artifact_path="$1"
+  local resolved
+  resolved="$(python3 - "$artifact_path" <<'PY'
+from pathlib import Path
+import sys
+print(Path(sys.argv[1]).expanduser().resolve())
+PY
+)"
+  if [[ ! -f "$resolved" ]]; then
+    echo "Error: prefilter artifact not found: $resolved"
+    exit 1
+  fi
+
+  eval "$(python3 - "$resolved" <<'PY'
+import json
+import shlex
+import sys
+from pathlib import Path
+
+data = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+fields = {
+    "PREFILTER_SOURCE_RUN_ID": data.get("prefilter_run_id", ""),
+    "QUERY": data.get("normalized_query", ""),
+    "PREFILTER_BRIEF_FILE": data.get("brief_path", ""),
+    "PREFILTER_QUERY_FILE": data.get("query_path", ""),
+    "PREFILTER_INPUT_MODE": data.get("input_mode", "inline_text"),
+    "PREFILTER_INPUT_FILE": data.get("input_file", ""),
+    "PREFILTER_SOURCE_LOG": data.get("prefilter_log_path", ""),
+}
+for key, value in fields.items():
+    clean = str(value).replace("\n", " ").replace("\r", " ")
+    print(f"{key}={shlex.quote(clean)}")
+PY
+)"
+  PREFILTER_SOURCE_ARTIFACT="$resolved"
+
+  if [[ -z "$QUERY" || -z "$PREFILTER_BRIEF_FILE" ]]; then
+    echo "Error: invalid prefilter artifact: $resolved"
+    exit 1
+  fi
+  if [[ ! -f "$PREFILTER_BRIEF_FILE" ]]; then
+    echo "Error: prefilter brief not found: $PREFILTER_BRIEF_FILE"
+    exit 1
+  fi
 }
 
 phase_start() {
@@ -169,16 +342,45 @@ PY
 )"
 fi
 
-RAW_INPUT_FILE="$(mktemp "${TMPDIR:-/tmp}/gpt-research-raw-input.${RUN_ID}.XXXXXX")"
-PREFILTER_QUERY_FILE="$(mktemp "${TMPDIR:-/tmp}/gpt-research-query.${RUN_ID}.XXXXXX")"
-PREFILTER_BRIEF_FILE="$LOGS_DIR/${RUN_ID}-prefilter-brief.md"
-RAW_OUTPUT_FILE="$(mktemp "${TMPDIR:-/tmp}/gpt-research-raw.${RUN_ID}.XXXXXX")"
-trap '[[ -f "$RAW_INPUT_FILE" ]] && rm -f "$RAW_INPUT_FILE"; [[ -f "$PREFILTER_QUERY_FILE" ]] && rm -f "$PREFILTER_QUERY_FILE"; [[ -f "$RAW_OUTPUT_FILE" ]] && rm -f "$RAW_OUTPUT_FILE"' EXIT
+RAW_INPUT_FILE=""
+PREFILTER_QUERY_FILE=""
+PREFILTER_BRIEF_FILE=""
+RAW_OUTPUT_FILE=""
+PREFILTER_ARTIFACT_FILE=""
+PREFILTER_SOURCE_ARTIFACT=""
+PREFILTER_SOURCE_RUN_ID=""
+PREFILTER_SOURCE_LOG=""
+PREFILTER_INPUT_MODE=""
+PREFILTER_INPUT_FILE=""
 
-if [[ -n "$INPUT_FILE" ]]; then
-  cat "$INPUT_FILE" > "$RAW_INPUT_FILE"
+if [[ -z "$FROM_PREFILTER" ]]; then
+  RAW_INPUT_FILE="$(mktemp "${TMPDIR:-/tmp}/gpt-research-raw-input.${RUN_ID}.XXXXXX")"
+  PREFILTER_QUERY_FILE="$LOGS_DIR/${RUN_ID}-prefilter-query.txt"
+  PREFILTER_BRIEF_FILE="$LOGS_DIR/${RUN_ID}-prefilter-brief.md"
+  RAW_OUTPUT_FILE="$(mktemp "${TMPDIR:-/tmp}/gpt-research-raw.${RUN_ID}.XXXXXX")"
+  trap 'cleanup_lock_meta; [[ -n "$RAW_INPUT_FILE" && -f "$RAW_INPUT_FILE" ]] && rm -f "$RAW_INPUT_FILE"; [[ -n "$RAW_OUTPUT_FILE" && -f "$RAW_OUTPUT_FILE" ]] && rm -f "$RAW_OUTPUT_FILE"' EXIT
+
+  if [[ -n "$INPUT_FILE" ]]; then
+    cat "$INPUT_FILE" > "$RAW_INPUT_FILE"
+  else
+    printf '%s\n' "$QUERY_RAW" > "$RAW_INPUT_FILE"
+  fi
 else
-  printf '%s\n' "$QUERY_RAW" > "$RAW_INPUT_FILE"
+  RAW_OUTPUT_FILE="$(mktemp "${TMPDIR:-/tmp}/gpt-research-raw.${RUN_ID}.XXXXXX")"
+  trap 'cleanup_lock_meta; [[ -n "$RAW_OUTPUT_FILE" && -f "$RAW_OUTPUT_FILE" ]] && rm -f "$RAW_OUTPUT_FILE"' EXIT
+  load_prefilter_artifact "$FROM_PREFILTER"
+fi
+
+{
+  echo "run_id=$RUN_ID"
+  echo "pid=$$"
+  echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "cwd=$ROOT_DIR"
+  echo "log=$RUN_LOG"
+} > "$LOCK_META_FILE"
+
+if [[ -n "$LEGACY_LANGUAGE_FLAG" ]]; then
+  echo "Legacy compatibility: $LEGACY_LANGUAGE_FLAG keeps the final report in English. English output is already the default."
 fi
 
 BEDROCK_MODEL_ID="${SMART_LLM#bedrock:}"
@@ -217,30 +419,110 @@ PY
 
 echo "Bedrock check passed for model: $BEDROCK_MODEL_ID"
 
-phase_start "prefilter"
-log_ts "prefilter_start input=$( [[ -n "$INPUT_FILE" ]] && echo file_as_query || echo inline_text )"
-python "$PREFILTER_SCRIPT" "$RAW_INPUT_FILE" "$PREFILTER_BRIEF_FILE" "$PREFILTER_QUERY_FILE" | tee -a "$RUN_LOG"
+if [[ -z "$FROM_PREFILTER" ]]; then
+  phase_start "prefilter"
+  PREFILTER_INPUT_MODE="$( [[ -n "$INPUT_FILE" ]] && echo file_as_query || echo inline_text )"
+  PREFILTER_INPUT_FILE="${INPUT_FILE:-}"
+  log_ts "prefilter_start input=$PREFILTER_INPUT_MODE"
+  python "$PREFILTER_SCRIPT" "$RAW_INPUT_FILE" "$PREFILTER_BRIEF_FILE" "$PREFILTER_QUERY_FILE" | tee -a "$RUN_LOG"
 
-QUERY="$(tr -d '\r' < "$PREFILTER_QUERY_FILE" | head -n 1 | sed 's/[[:space:]]\+$//')"
-if [[ -z "$QUERY" ]]; then
-  phase_done "prefilter" "error_empty_query"
-  echo "Error: prefilter produced empty query"
-  exit 1
+  QUERY="$(tr -d '\r' < "$PREFILTER_QUERY_FILE" | head -n 1 | sed 's/[[:space:]]\+$//')"
+  if [[ -z "$QUERY" ]]; then
+    phase_done "prefilter" "error_empty_query"
+    echo "Error: prefilter produced empty query"
+    exit 1
+  fi
+
+  echo "Generated web research query:"
+  echo "$QUERY"
+  echo "Prefilter brief saved: $PREFILTER_BRIEF_FILE"
+  phase_done "prefilter" "success"
+
+  PREFILTER_ARTIFACT_FILE="$LOGS_DIR/${RUN_ID}-prefilter.json"
+  write_prefilter_artifact "$PREFILTER_ARTIFACT_FILE" "$PREFILTER_INPUT_MODE" "$PREFILTER_INPUT_FILE"
+
+  if [[ "$PREFILTER_ONLY" -eq 1 ]]; then
+    echo "Prefilter artifact saved: $PREFILTER_ARTIFACT_FILE"
+    echo "Normalized brief: $PREFILTER_BRIEF_FILE"
+    echo "Run log: $RUN_LOG"
+    echo "STATUS: prefilter_ready"
+    echo "PREFILTER_ARTIFACT: $PREFILTER_ARTIFACT_FILE"
+    echo "PREFILTER_BRIEF: $PREFILTER_BRIEF_FILE"
+    echo "PREFILTER_QUERY: $QUERY"
+    echo "PREFILTER_INPUT_MODE: $PREFILTER_INPUT_MODE"
+    echo "PREFILTER_RUN_LOG: $RUN_LOG"
+    exit 0
+  fi
+else
+  echo "Loaded prefilter artifact: $PREFILTER_SOURCE_ARTIFACT"
+  echo "Generated web research query:"
+  echo "$QUERY"
+  echo "Prefilter brief saved: $PREFILTER_BRIEF_FILE"
 fi
 
-echo "Generated web research query:"
-echo "$QUERY"
-echo "Prefilter brief saved: $PREFILTER_BRIEF_FILE"
-phase_done "prefilter" "success"
+confirm_research_start() {
+  local reply
+  local mode="$1"
+
+  if [[ "$mode" == "no" ]]; then
+    log_ts "prefilter_confirm skip=flag"
+    return 0
+  fi
+
+  if [[ "$mode" == "auto" && ! -t 0 ]]; then
+    log_ts "prefilter_confirm skip=non_interactive"
+    return 0
+  fi
+
+  echo
+  echo "Normalized brief:"
+  sed -n '1,80p' "$PREFILTER_BRIEF_FILE"
+  echo
+  echo "Normalized web query:"
+  echo "$QUERY"
+  echo
+
+  while true; do
+    printf "Start research with this query? [Y/n/e]: "
+    IFS= read -r reply
+    reply="$(printf '%s' "$reply" | tr '[:upper:]' '[:lower:]' | xargs)"
+
+    case "$reply" in
+      ""|y|yes)
+        log_ts "prefilter_confirm answer=yes"
+        return 0
+        ;;
+      n|no)
+        log_ts "prefilter_confirm answer=no"
+        echo "Cancelled before web research."
+        exit 12
+        ;;
+      e|edit)
+        log_ts "prefilter_confirm answer=edit"
+        echo "Edit your request and run the command again."
+        exit 13
+        ;;
+      *)
+        echo "Please answer y, n, or e."
+        ;;
+    esac
+  done
+}
+
+confirm_research_start "$CONFIRM_BEFORE_RESEARCH"
 
 {
   echo "run_id=$RUN_ID"
   echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  echo "mode=web_only"
+  echo "mode=$( [[ -n "$FROM_PREFILTER" ]] && echo from_prefilter || echo web_only )"
   echo "report_source=web"
-  echo "input_mode=$( [[ -n "$INPUT_FILE" ]] && echo file_as_query || echo inline_text )"
-  echo "input_file=${INPUT_FILE:-}"
+  echo "input_mode=${PREFILTER_INPUT_MODE:-$( [[ -n "$INPUT_FILE" ]] && echo file_as_query || echo inline_text )}"
+  echo "input_file=${PREFILTER_INPUT_FILE:-${INPUT_FILE:-}}"
   echo "prefilter_brief=$PREFILTER_BRIEF_FILE"
+  echo "prefilter_query_file=${PREFILTER_QUERY_FILE:-}"
+  echo "prefilter_artifact=${PREFILTER_ARTIFACT_FILE:-$PREFILTER_SOURCE_ARTIFACT}"
+  echo "prefilter_source_run_id=${PREFILTER_SOURCE_RUN_ID:-$RUN_ID}"
+  echo "prefilter_source_log=${PREFILTER_SOURCE_LOG:-$RUN_LOG}"
   echo "web_timeout_seconds=$WEB_TIMEOUT_SECONDS"
   echo "report_type=$REPORT_TYPE"
   echo "deep_research_breadth=$DEEP_RESEARCH_BREADTH"
@@ -346,6 +628,16 @@ for _, name, dur, reason in phase_re.findall(text):
     phase_durations[name] = {"duration_s": int(dur), "reason": reason}
 
 tel_lines = [line for line in text.splitlines() if line.startswith("TELEMETRY_JSON ")]
+def blank_usage():
+    return {
+        "calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "estimated_cost_usd": 0.0,
+    }
+
 bedrock = {
     "calls": 0,
     "input_tokens": 0,
@@ -355,19 +647,12 @@ bedrock = {
     "estimated_cost_usd": 0.0,
 }
 bedrock_by_stage = {
-    "prefilter": {
-        "calls": 0, "input_tokens": 0, "output_tokens": 0,
-        "cache_read_input_tokens": 0, "cache_write_input_tokens": 0, "estimated_cost_usd": 0.0,
-    },
-    "research": {
-        "calls": 0, "input_tokens": 0, "output_tokens": 0,
-        "cache_read_input_tokens": 0, "cache_write_input_tokens": 0, "estimated_cost_usd": 0.0,
-    },
-    "translation": {
-        "calls": 0, "input_tokens": 0, "output_tokens": 0,
-        "cache_read_input_tokens": 0, "cache_write_input_tokens": 0, "estimated_cost_usd": 0.0,
-    },
+    "prefilter": blank_usage(),
+    "research": blank_usage(),
+    "translation": blank_usage(),
 }
+bedrock_by_step = {}
+bedrock_by_model = {}
 tavily = {
     "calls_dedup": 0,
     "failed_calls": 0,
@@ -408,6 +693,39 @@ def estimate_bedrock_usage_cost(model_name: str, usage: dict) -> float:
         + (cw * r["cache_write"])
     ) / 1_000_000.0
 
+def normalize_usage(usage: dict) -> tuple[int, int, int, int]:
+    inp = int(usage.get("inputTokens", usage.get("input_tokens", 0)) or 0)
+    out = int(usage.get("outputTokens", usage.get("output_tokens", 0)) or 0)
+    cr = int(
+        usage.get(
+            "cacheReadInputTokens",
+            usage.get("cache_read_input_tokens", usage.get("input_token_details", {}).get("cache_read", 0)),
+        )
+        or 0
+    )
+    cw = int(
+        usage.get(
+            "cacheWriteInputTokens",
+            usage.get("cache_write_input_tokens", usage.get("input_token_details", {}).get("cache_creation", 0)),
+        )
+        or 0
+    )
+    return inp, out, cr, cw
+
+def usage_bucket(store: dict, key: str):
+    if key not in store:
+        store[key] = blank_usage()
+    return store[key]
+
+def add_usage(target: dict, usage: dict, estimated_cost_usd: float) -> None:
+    inp, out, cr, cw = normalize_usage(usage)
+    target["calls"] += 1
+    target["input_tokens"] += inp
+    target["output_tokens"] += out
+    target["cache_read_input_tokens"] += cr
+    target["cache_write_input_tokens"] += cw
+    target["estimated_cost_usd"] += float(estimated_cost_usd or 0.0)
+
 for raw in tel_lines:
     payload = raw[len("TELEMETRY_JSON "):]
     try:
@@ -417,92 +735,27 @@ for raw in tel_lines:
     typ = item.get("type")
     if typ == "bedrock_usage":
         usage = item.get("usage", {}) or {}
-        inp = int(usage.get("inputTokens", usage.get("input_tokens", 0)) or 0)
-        out = int(usage.get("outputTokens", usage.get("output_tokens", 0)) or 0)
-        cr = int(
-            usage.get(
-                "cacheReadInputTokens",
-                usage.get("cache_read_input_tokens", usage.get("input_token_details", {}).get("cache_read", 0)),
-            )
-            or 0
-        )
-        cw = int(
-            usage.get(
-                "cacheWriteInputTokens",
-                usage.get("cache_write_input_tokens", usage.get("input_token_details", {}).get("cache_creation", 0)),
-            )
-            or 0
-        )
-        bedrock["calls"] += 1
-        bedrock["input_tokens"] += inp
-        bedrock["output_tokens"] += out
-        bedrock["cache_read_input_tokens"] += cr
-        bedrock["cache_write_input_tokens"] += cw
         event_cost = float(item.get("estimated_cost_usd", 0.0) or 0.0)
         if event_cost <= 0:
             event_cost = estimate_bedrock_usage_cost(item.get("model", ""), usage)
-        bedrock["estimated_cost_usd"] += event_cost
+        add_usage(bedrock, usage, event_cost)
+        model_key = str(item.get("model", "") or "unknown")
+        add_usage(usage_bucket(bedrock_by_model, model_key), usage, event_cost)
     elif typ in ("prefilter_bedrock", "translation_bedrock"):
         usage = item.get("usage", {}) or {}
         model_name = item.get("model", "")
-        inp = int(usage.get("inputTokens", usage.get("input_tokens", 0)) or 0)
-        out = int(usage.get("outputTokens", usage.get("output_tokens", 0)) or 0)
-        cr = int(
-            usage.get(
-                "cacheReadInputTokens",
-                usage.get("cache_read_input_tokens", usage.get("input_token_details", {}).get("cache_read", 0)),
-            )
-            or 0
-        )
-        cw = int(
-            usage.get(
-                "cacheWriteInputTokens",
-                usage.get("cache_write_input_tokens", usage.get("input_token_details", {}).get("cache_creation", 0)),
-            )
-            or 0
-        )
-        bedrock["calls"] += 1
-        bedrock["input_tokens"] += inp
-        bedrock["output_tokens"] += out
-        bedrock["cache_read_input_tokens"] += cr
-        bedrock["cache_write_input_tokens"] += cw
         c = estimate_bedrock_usage_cost(model_name, usage)
-        bedrock["estimated_cost_usd"] += c
+        add_usage(bedrock, usage, c)
         stage_key = "prefilter" if typ == "prefilter_bedrock" else "translation"
-        stage = bedrock_by_stage[stage_key]
-        stage["calls"] += 1
-        stage["input_tokens"] += int(usage.get("inputTokens", 0) or 0)
-        stage["output_tokens"] += int(usage.get("outputTokens", 0) or 0)
-        stage["cache_read_input_tokens"] += int(usage.get("cacheReadInputTokens", 0) or 0)
-        stage["cache_write_input_tokens"] += int(usage.get("cacheWriteInputTokens", 0) or 0)
-        stage["estimated_cost_usd"] += c
+        add_usage(bedrock_by_stage[stage_key], usage, c)
+        add_usage(usage_bucket(bedrock_by_step, stage_key), usage, c)
+        add_usage(usage_bucket(bedrock_by_model, model_name or "unknown"), usage, c)
     elif typ == "bedrock_usage_step":
         step_name = str(item.get("step", "research"))
-        if step_name in ("agent_selection", "research", "report_writing", "deep_research"):
-            usage = item.get("usage", {}) or {}
-            inp = int(usage.get("inputTokens", usage.get("input_tokens", 0)) or 0)
-            out = int(usage.get("outputTokens", usage.get("output_tokens", 0)) or 0)
-            cr = int(
-                usage.get(
-                    "cacheReadInputTokens",
-                    usage.get("cache_read_input_tokens", usage.get("input_token_details", {}).get("cache_read", 0)),
-                )
-                or 0
-            )
-            cw = int(
-                usage.get(
-                    "cacheWriteInputTokens",
-                    usage.get("cache_write_input_tokens", usage.get("input_token_details", {}).get("cache_creation", 0)),
-                )
-                or 0
-            )
-            stage = bedrock_by_stage["research"]
-            stage["calls"] += 1
-            stage["input_tokens"] += inp
-            stage["output_tokens"] += out
-            stage["cache_read_input_tokens"] += cr
-            stage["cache_write_input_tokens"] += cw
-            stage["estimated_cost_usd"] += float(item.get("estimated_cost_usd", 0.0) or 0.0)
+        usage = item.get("usage", {}) or {}
+        event_cost = float(item.get("estimated_cost_usd", 0.0) or 0.0)
+        add_usage(bedrock_by_stage["research"], usage, event_cost)
+        add_usage(usage_bucket(bedrock_by_step, step_name), usage, event_cost)
     elif typ == "tavily_usage":
         # Keep only canonical events from agent runtime and ignore duplicate usage-only events.
         is_canonical = ("success" in item) or ("totals" in item)
@@ -559,6 +812,8 @@ meta = {
     "phases": phase_durations,
     "bedrock": bedrock,
     "bedrock_by_stage": bedrock_by_stage,
+    "bedrock_by_step": bedrock_by_step,
+    "bedrock_by_model": bedrock_by_model,
     "tavily": tavily,
     "soft_limit": soft_limit,
     "stage_calls": {
@@ -570,9 +825,13 @@ print(json.dumps(meta, ensure_ascii=False))
 PY
 )"
 
-telemetry_md="$(python3 - "$telemetry_json" <<'PY'
+TELEMETRY_FILE="$LOGS_DIR/${RUN_ID}-telemetry.json"
+printf "%s\n" "$telemetry_json" > "$TELEMETRY_FILE"
+
+telemetry_md="$(python3 - "$TELEMETRY_FILE" <<'PY'
 import json, sys
-t = json.loads(sys.argv[1])
+from pathlib import Path
+t = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 phases = t.get("phases", {})
 bed = t.get("bedrock", {})
 tav = t.get("tavily", {})
@@ -581,39 +840,107 @@ cnt = t.get("counts", {})
 soft = t.get("soft_limit", {})
 stage_calls = t.get("stage_calls", {})
 stage_bedrock = t.get("bedrock_by_stage", {})
+step_bedrock = t.get("bedrock_by_step", {})
+model_bedrock = t.get("bedrock_by_model", {})
 
 def d(name):
     return phases.get(name, {}).get("duration_s", 0)
 
+def usd(v):
+    return f"${float(v or 0.0):.6f}"
+
+def fmt_int(v):
+    return f"{int(v or 0):,}"
+
+def row(name, stats):
+    return (
+        f"| {name} | {fmt_int(stats.get('calls',0))} | {usd(stats.get('estimated_cost_usd',0.0))} "
+        f"| {fmt_int(stats.get('input_tokens',0))} | {fmt_int(stats.get('output_tokens',0))} "
+        f"| {fmt_int(stats.get('cache_read_input_tokens',0))} | {fmt_int(stats.get('cache_write_input_tokens',0))} |"
+    )
+
 lines = []
-lines.append("## Run telemetry")
+lines.append("## Телеметрия запуска")
+lines.append("")
+lines.append("### Сводка")
 lines.append("")
 lines.append(f"- Run ID: `{t.get('run_id','')}`")
-lines.append(f"- Generated at (UTC): `{t.get('generated_at_utc','')}`")
-lines.append(f"- Report type: `{t.get('report_type','')}`")
-lines.append(f"- Models: FAST `{t['models']['fast']}`, SMART `{t['models']['smart']}`, STRATEGIC `{t['models']['strategic']}`")
-lines.append(f"- Duration by phase (s): prefilter `{d('prefilter')}`, research_web `{d('research_web')}`, translation_ru `{d('translation_ru')}`")
+lines.append(f"- Время генерации (UTC): `{t.get('generated_at_utc','')}`")
+lines.append(f"- Тип отчета: `{t.get('report_type','')}`")
+lines.append(f"- Общая стоимость Bedrock: `{usd(bed.get('estimated_cost_usd',0.0))}`")
 lines.append(
-    f"- Run params: report_source `{params.get('report_source','')}`, report_type `{params.get('report_type','')}`, input_mode `{params.get('input_mode','')}`, web_timeout_seconds `{params.get('web_timeout_seconds','')}`, soft_limit_enabled `{params.get('soft_limit_enabled','')}`, soft_limit_tavily_calls `{params.get('soft_limit_tavily_calls','')}`, soft_limit_bedrock_total_tokens `{params.get('soft_limit_bedrock_total_tokens','')}`, soft_limit_elapsed_seconds `{params.get('soft_limit_elapsed_seconds','')}`, soft_limit_max_subqueries `{params.get('soft_limit_max_subqueries','')}`"
+    f"- Bedrock всего: calls `{fmt_int(bed.get('calls',0))}`, input `{fmt_int(bed.get('input_tokens',0))}`, "
+    f"output `{fmt_int(bed.get('output_tokens',0))}`, cache_read `{fmt_int(bed.get('cache_read_input_tokens',0))}`, "
+    f"cache_write `{fmt_int(bed.get('cache_write_input_tokens',0))}`"
 )
-lines.append(f"- Bedrock calls/tokens: calls `{bed.get('calls',0)}`, input `{bed.get('input_tokens',0)}`, output `{bed.get('output_tokens',0)}`, cache_read `{bed.get('cache_read_input_tokens',0)}`, cache_write `{bed.get('cache_write_input_tokens',0)}`")
-lines.append(f"- Bedrock estimated cost (USD): `${bed.get('estimated_cost_usd',0.0):.6f}`")
-lines.append(f"- Tavily usage: calls_dedup `{tav.get('calls_dedup', tav.get('calls',0))}`, failed `{tav.get('failed_calls',0)}`, estimated_credits `{tav.get('estimated_credits',0.0):.2f}`")
-lines.append(f"- Research activity: planning_web_passes `{cnt.get('planning_web_passes',0)}`, running_subqueries `{cnt.get('running_subqueries',0)}`, source_urls_added `{cnt.get('source_urls_added',0)}`, throttling_errors `{cnt.get('throttling_errors',0)}`")
+lines.append(
+    f"- Tavily: calls `{fmt_int(tav.get('calls_dedup', tav.get('calls',0)))}`, failed `{fmt_int(tav.get('failed_calls',0))}`, "
+    f"estimated_credits `{float(tav.get('estimated_credits',0.0)):.2f}`"
+)
+lines.append(
+    f"- Длительность фаз (сек): prefilter `{d('prefilter')}`, research_web `{d('research_web')}`, translation_ru `{d('translation_ru')}`"
+)
+lines.append(
+    f"- Активность: planning_web_passes `{fmt_int(cnt.get('planning_web_passes',0))}`, running_subqueries `{fmt_int(cnt.get('running_subqueries',0))}`, "
+    f"source_urls_added `{fmt_int(cnt.get('source_urls_added',0))}`, throttling_errors `{fmt_int(cnt.get('throttling_errors',0))}`"
+)
+lines.append(
+    f"- Лимиты: soft_limit_enabled `{params.get('soft_limit_enabled','')}`, tavily_calls `{params.get('soft_limit_tavily_calls','')}`, "
+    f"bedrock_total_tokens `{params.get('soft_limit_bedrock_total_tokens','')}`, elapsed_seconds `{params.get('soft_limit_elapsed_seconds','')}`, "
+    f"max_subqueries `{params.get('soft_limit_max_subqueries','')}`"
+)
+lines.append(
+    f"- Soft limit triggered: `{str(soft.get('triggered', False)).lower()}`" +
+    (f", reason `{soft.get('reason','')}`" if soft.get("reason") else "")
+)
+lines.append("")
+lines.append("### Bedrock по этапам")
+lines.append("")
+lines.append("| Этап | Calls | Cost USD | Input tokens | Output tokens | Cache read | Cache write |")
+lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: |")
 for stage_name in ("prefilter", "research", "translation"):
-    s = stage_bedrock.get(stage_name, {})
-    lines.append(
-        f"- Bedrock {stage_name}: calls `{s.get('calls',0)}`, input `{s.get('input_tokens',0)}`, output `{s.get('output_tokens',0)}`, cache_read `{s.get('cache_read_input_tokens',0)}`, cache_write `{s.get('cache_write_input_tokens',0)}`, est_cost `${s.get('estimated_cost_usd',0.0):.6f}`"
-    )
-lines.append(f"- Stage Bedrock call counters: prefilter `{stage_calls.get('prefilter_calls',0)}`, translation `{stage_calls.get('translation_calls',0)}`")
-lines.append(f"- Soft limit: triggered `{str(soft.get('triggered', False)).lower()}`" + (f", reason `{soft.get('reason','')}`" if soft.get("reason") else ""))
+    lines.append(row(stage_name, stage_bedrock.get(stage_name, {})))
+lines.append("")
+nonzero_steps = [
+    (name, stats) for name, stats in step_bedrock.items()
+    if int(stats.get("calls", 0)) > 0 or float(stats.get("estimated_cost_usd", 0.0)) > 0
+]
+if nonzero_steps:
+    lines.append("### Bedrock по шагам")
+    lines.append("")
+    lines.append("| Шаг | Calls | Cost USD | Input tokens | Output tokens | Cache read | Cache write |")
+    lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: |")
+    for name, stats in sorted(nonzero_steps, key=lambda item: (-float(item[1].get("estimated_cost_usd", 0.0)), item[0])):
+        lines.append(row(name, stats))
+    lines.append("")
+nonzero_models = [
+    (name, stats) for name, stats in model_bedrock.items()
+    if int(stats.get("calls", 0)) > 0 or float(stats.get("estimated_cost_usd", 0.0)) > 0
+]
+if nonzero_models:
+    lines.append("### Bedrock по моделям")
+    lines.append("")
+    lines.append("| Модель | Calls | Cost USD | Input tokens | Output tokens | Cache read | Cache write |")
+    lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: |")
+    for name, stats in sorted(nonzero_models, key=lambda item: (-float(item[1].get("estimated_cost_usd", 0.0)), item[0])):
+        lines.append(row(name, stats))
+    lines.append("")
+lines.append("### Технические параметры")
+lines.append("")
+lines.append(f"- Models: FAST `{t['models']['fast']}`, SMART `{t['models']['smart']}`, STRATEGIC `{t['models']['strategic']}`")
+lines.append(
+    f"- Run params: report_source `{params.get('report_source','')}`, report_type `{params.get('report_type','')}`, "
+    f"input_mode `{params.get('input_mode','')}`, web_timeout_seconds `{params.get('web_timeout_seconds','')}`"
+)
+lines.append(
+    f"- Stage call counters: prefilter `{stage_calls.get('prefilter_calls',0)}`, translation `{stage_calls.get('translation_calls',0)}`"
+)
 print("\n".join(lines))
 PY
 )"
 
 printf "\n\n%s\n" "$telemetry_md" >> "$DEST_REPORT"
-printf "%s\n" "$telemetry_json" > "$LOGS_DIR/${RUN_ID}-telemetry.json"
-echo "Saved telemetry: $LOGS_DIR/${RUN_ID}-telemetry.json"
+echo "Saved telemetry: $TELEMETRY_FILE"
 
 echo "Saved log: $RUN_LOG"
 echo "Saved report: $DEST_REPORT"

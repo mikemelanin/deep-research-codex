@@ -29,64 +29,71 @@ You must set in `.env`:
 ./research.sh "Your topic here"
 ```
 
-Research from a markdown brief:
+Default behavior:
+
+- runs deep research with the local default profile (`4/2/4`)
+- saves the final report in English
+
+Translate the final report to Russian:
+
+```bash
+./research.sh --ru "Your topic here"
+```
+
+Prepare normalized brief/query only:
+
+```bash
+./research.sh --prefilter-only "Your topic here"
+```
+
+Continue from saved prefilter artifact:
+
+```bash
+./research.sh --from-prefilter "/absolute/path/to/logs/YYYYMMDD-HHMMSS-prefilter.json"
+```
+
+Legacy compatibility flags still work, but are no longer the main path:
+
+```bash
+./research.sh --deep "Your topic here"
+./research.sh --no-translate "Your topic here"
+./research.sh --en "Your topic here"
+```
+
+Skip confirmation prompt:
+
+```bash
+./research.sh --yes "Your topic here"
+```
+
+Run from a markdown note (file is used as query input only):
 
 ```bash
 ./research.sh --file "/Users/melanin/Downloads/context.md"
 ```
 
-Explicit web-only mode (same behavior as default for `--file`):
+Shortcut: pass `.md` path directly (without `--file`):
 
 ```bash
-./research.sh --file "/Users/melanin/Downloads/context.md" --file-mode query
+./research.sh "/Users/melanin/Downloads/context.md"
 ```
 
-Legacy hybrid mode (only when you explicitly need local DOC_PATH context):
+How pipeline works now:
 
-```bash
-./research.sh --file "/Users/melanin/Downloads/context.md" --file-mode source
-```
-
-Optional brief claim verification (adds verification table to report):
-
-```bash
-./research.sh --file "/Users/melanin/Downloads/context.md" --verify-brief
-```
-
-You can add a specific focus after the file:
-
-```bash
-./research.sh --file "/Users/melanin/Downloads/context.md" "focus on competitors and ROI"
-```
-
-English-only mode:
-
-```bash
-./research.sh --en "Your topic here"
-```
+- input (`inline text` or `file_as_query`) is treated as raw request
+- prefilter LLM rewrites it into `# Research task` markdown + compact web query
+- `--prefilter-only` stops after that step and saves a reusable artifact in `logs/`
+- `--from-prefilter` resumes from saved normalized query without repeating prefilter
+- in interactive terminal runs, script asks to confirm normalized brief/query before paid web research starts
+- GPT Researcher always runs with `report_source=web`
+- default report type is `deep`
+- markdown file is not loaded as local context source for report generation
 
 Output file format:
 
-- default: `~/Downloads/YYYY-MM-DD-topic.md`
-- with `--en`: `~/Downloads/YYYY-MM-DD-topic.md`
-
-For `--file`, the script supports two modes:
-
-- default `--file-mode query`:
-  - runs `report_source=web`
-  - markdown is used only to create a compact web query
-  - no `DOC_PATH` local-context loading
-- legacy `--file-mode source`:
-  - runs `report_source=hybrid`
-  - markdown is loaded as local context via `DOC_PATH`
-  - on hybrid failure, script auto-falls back to web mode
-
-For `--file --verify-brief`, a post-check section is appended to the report:
-
-- `## Brief Claim Verification`
-- table columns: `Claim | Status | Evidence URL | Note`
-- statuses: `verified`, `conflicting`, `unverified`
-- only external URLs are treated as evidence (brief text itself is not evidence)
+- final saved report: `~/Downloads/YYYY-MM-DD-topic.md` in English by default
+- `--ru` translates the final saved report to Russian
+- source English report: `gpt-researcher/outputs/<uuid>.md`
 
 Phase diagnostics in run log:
 
@@ -100,3 +107,19 @@ Phase diagnostics in run log:
 - Bedrock settings use `bedrock:` models
 - AWS creds and region are valid
 - Claude model is callable via Bedrock
+- only one run can be active at a time; concurrent second start is rejected
+
+## Compare deep profiles
+
+Run the built-in comparison runner on one topic with one shared prefilter artifact:
+
+```bash
+./.venv/bin/python scripts/compare_deep_profiles.py "Your topic here"
+```
+
+What it does:
+
+- generates one reusable `prefilter.json`
+- runs three deep profiles on the same normalized query
+- saves per-profile `report/log/telemetry`
+- writes `comparison-summary.md` and `comparison-summary.json` under `logs/<timestamp>-deep-compare-.../`
