@@ -6,8 +6,8 @@
     {
       "id": "title",
       "type": "text",
-      "x": 50,
-      "y": 30,
+      "x": 60,
+      "y": 35,
       "width": 980,
       "height": 40,
       "angle": 0,
@@ -21,30 +21,30 @@
       "groupIds": [],
       "frameId": null,
       "roundness": null,
-      "seed": 1201,
+      "seed": 2001,
       "version": 1,
-      "versionNonce": 1201,
+      "versionNonce": 2001,
       "isDeleted": false,
       "boundElements": null,
       "updated": 1,
       "link": null,
       "locked": false,
-      "text": "Deep Research Codex: установка и запуск через skill",
-      "fontSize": 27,
+      "text": "Deep Research Codex workflow",
+      "fontSize": 28,
       "fontFamily": 1,
       "textAlign": "left",
       "verticalAlign": "middle",
       "containerId": null,
-      "originalText": "Deep Research Codex: установка и запуск через skill",
+      "originalText": "Deep Research Codex workflow",
       "lineHeight": 1.15
     },
     {
-      "id": "clone",
+      "id": "user",
       "type": "rectangle",
       "x": 60,
-      "y": 120,
-      "width": 190,
-      "height": 82,
+      "y": 130,
+      "width": 180,
+      "height": 90,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "#e7f5ff",
@@ -58,17 +58,17 @@
       "roundness": {
         "type": 3
       },
-      "seed": 1202,
+      "seed": 2002,
       "version": 1,
-      "versionNonce": 1202,
+      "versionNonce": 2002,
       "isDeleted": false,
       "boundElements": [
         {
-          "id": "clone_t",
+          "id": "user_t",
           "type": "text"
         },
         {
-          "id": "a_clone_config",
+          "id": "a_user_skill",
           "type": "arrow"
         }
       ],
@@ -77,12 +77,12 @@
       "locked": false
     },
     {
-      "id": "clone_t",
+      "id": "user_t",
       "type": "text",
       "x": 70,
-      "y": 130,
-      "width": 170,
-      "height": 62,
+      "y": 140,
+      "width": 160,
+      "height": 70,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -94,107 +94,30 @@
       "groupIds": [],
       "frameId": null,
       "roundness": null,
-      "seed": 1203,
+      "seed": 2003,
       "version": 1,
-      "versionNonce": 1203,
+      "versionNonce": 2003,
       "isDeleted": false,
       "boundElements": null,
       "updated": 1,
       "link": null,
       "locked": false,
-      "text": "git clone\nрепозиторий с кодом",
-      "fontSize": 16,
+      "text": "Пользователь\nпросит research",
+      "fontSize": 18,
       "fontFamily": 1,
       "textAlign": "center",
       "verticalAlign": "middle",
-      "containerId": "clone",
-      "originalText": "git clone\nрепозиторий с кодом",
-      "lineHeight": 1.15
-    },
-    {
-      "id": "config",
-      "type": "rectangle",
-      "x": 310,
-      "y": 120,
-      "width": 190,
-      "height": 82,
-      "angle": 0,
-      "strokeColor": "#1e1e1e",
-      "backgroundColor": "#fff4e6",
-      "fillStyle": "solid",
-      "strokeWidth": 2,
-      "strokeStyle": "solid",
-      "roughness": 1,
-      "opacity": 100,
-      "groupIds": [],
-      "frameId": null,
-      "roundness": {
-        "type": 3
-      },
-      "seed": 1204,
-      "version": 1,
-      "versionNonce": 1204,
-      "isDeleted": false,
-      "boundElements": [
-        {
-          "id": "config_t",
-          "type": "text"
-        },
-        {
-          "id": "a_clone_config",
-          "type": "arrow"
-        },
-        {
-          "id": "a_config_skill",
-          "type": "arrow"
-        }
-      ],
-      "updated": 1,
-      "link": null,
-      "locked": false
-    },
-    {
-      "id": "config_t",
-      "type": "text",
-      "x": 320,
-      "y": 130,
-      "width": 170,
-      "height": 62,
-      "angle": 0,
-      "strokeColor": "#1e1e1e",
-      "backgroundColor": "transparent",
-      "fillStyle": "solid",
-      "strokeWidth": 2,
-      "strokeStyle": "solid",
-      "roughness": 1,
-      "opacity": 100,
-      "groupIds": [],
-      "frameId": null,
-      "roundness": null,
-      "seed": 1205,
-      "version": 1,
-      "versionNonce": 1205,
-      "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
-      "link": null,
-      "locked": false,
-      "text": ".env\nключи и доступы",
-      "fontSize": 16,
-      "fontFamily": 1,
-      "textAlign": "center",
-      "verticalAlign": "middle",
-      "containerId": "config",
-      "originalText": ".env\nключи и доступы",
+      "containerId": "user",
+      "originalText": "Пользователь\nпросит research",
       "lineHeight": 1.15
     },
     {
       "id": "skill",
       "type": "rectangle",
-      "x": 560,
-      "y": 120,
-      "width": 190,
-      "height": 82,
+      "x": 310,
+      "y": 130,
+      "width": 180,
+      "height": 90,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "#e6fcf5",
@@ -208,9 +131,9 @@
       "roundness": {
         "type": 3
       },
-      "seed": 1206,
+      "seed": 2004,
       "version": 1,
-      "versionNonce": 1206,
+      "versionNonce": 2004,
       "isDeleted": false,
       "boundElements": [
         {
@@ -218,15 +141,11 @@
           "type": "text"
         },
         {
-          "id": "a_config_skill",
+          "id": "a_user_skill",
           "type": "arrow"
         },
         {
-          "id": "a_skill_codex",
-          "type": "arrow"
-        },
-        {
-          "id": "a_skill_note",
+          "id": "a_skill_prefilter",
           "type": "arrow"
         }
       ],
@@ -237,10 +156,10 @@
     {
       "id": "skill_t",
       "type": "text",
-      "x": 570,
-      "y": 130,
-      "width": 170,
-      "height": 62,
+      "x": 320,
+      "y": 140,
+      "width": 160,
+      "height": 70,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -252,263 +171,30 @@
       "groupIds": [],
       "frameId": null,
       "roundness": null,
-      "seed": 1207,
+      "seed": 2005,
       "version": 1,
-      "versionNonce": 1207,
+      "versionNonce": 2005,
       "isDeleted": false,
       "boundElements": null,
       "updated": 1,
       "link": null,
       "locked": false,
-      "text": "install skill\n~/.codex/skills/research",
-      "fontSize": 16,
+      "text": "Codex\nзапускает skill",
+      "fontSize": 18,
       "fontFamily": 1,
       "textAlign": "center",
       "verticalAlign": "middle",
       "containerId": "skill",
-      "originalText": "install skill\n~/.codex/skills/research",
+      "originalText": "Codex\nзапускает skill",
       "lineHeight": 1.15
-    },
-    {
-      "id": "codex",
-      "type": "rectangle",
-      "x": 810,
-      "y": 120,
-      "width": 190,
-      "height": 82,
-      "angle": 0,
-      "strokeColor": "#1e1e1e",
-      "backgroundColor": "#f3f0ff",
-      "fillStyle": "solid",
-      "strokeWidth": 2,
-      "strokeStyle": "solid",
-      "roughness": 1,
-      "opacity": 100,
-      "groupIds": [],
-      "frameId": null,
-      "roundness": {
-        "type": 3
-      },
-      "seed": 1208,
-      "version": 1,
-      "versionNonce": 1208,
-      "isDeleted": false,
-      "boundElements": [
-        {
-          "id": "codex_t",
-          "type": "text"
-        },
-        {
-          "id": "a_skill_codex",
-          "type": "arrow"
-        },
-        {
-          "id": "a_codex_prefilter",
-          "type": "arrow"
-        }
-      ],
-      "updated": 1,
-      "link": null,
-      "locked": false
-    },
-    {
-      "id": "codex_t",
-      "type": "text",
-      "x": 820,
-      "y": 130,
-      "width": 170,
-      "height": 62,
-      "angle": 0,
-      "strokeColor": "#1e1e1e",
-      "backgroundColor": "transparent",
-      "fillStyle": "solid",
-      "strokeWidth": 2,
-      "strokeStyle": "solid",
-      "roughness": 1,
-      "opacity": 100,
-      "groupIds": [],
-      "frameId": null,
-      "roundness": null,
-      "seed": 1209,
-      "version": 1,
-      "versionNonce": 1209,
-      "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
-      "link": null,
-      "locked": false,
-      "text": "Codex\n“сделай research”",
-      "fontSize": 16,
-      "fontFamily": 1,
-      "textAlign": "center",
-      "verticalAlign": "middle",
-      "containerId": "codex",
-      "originalText": "Codex\n“сделай research”",
-      "lineHeight": 1.15
-    },
-    {
-      "id": "a_clone_config",
-      "type": "arrow",
-      "x": 250,
-      "y": 161.0,
-      "width": 60,
-      "height": 0.0,
-      "angle": 0,
-      "strokeColor": "#1e1e1e",
-      "backgroundColor": "transparent",
-      "fillStyle": "solid",
-      "strokeWidth": 2,
-      "strokeStyle": "solid",
-      "roughness": 1,
-      "opacity": 100,
-      "groupIds": [],
-      "frameId": null,
-      "roundness": {
-        "type": 2
-      },
-      "seed": 1210,
-      "version": 1,
-      "versionNonce": 1210,
-      "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
-      "link": null,
-      "locked": false,
-      "points": [
-        [
-          0,
-          0
-        ],
-        [
-          60,
-          0.0
-        ]
-      ],
-      "lastCommittedPoint": null,
-      "startBinding": {
-        "elementId": "clone",
-        "focus": 0,
-        "gap": 1
-      },
-      "endBinding": {
-        "elementId": "config",
-        "focus": 0,
-        "gap": 1
-      },
-      "startArrowhead": null,
-      "endArrowhead": "arrow"
-    },
-    {
-      "id": "a_config_skill",
-      "type": "arrow",
-      "x": 500,
-      "y": 161.0,
-      "width": 60,
-      "height": 0.0,
-      "angle": 0,
-      "strokeColor": "#1e1e1e",
-      "backgroundColor": "transparent",
-      "fillStyle": "solid",
-      "strokeWidth": 2,
-      "strokeStyle": "solid",
-      "roughness": 1,
-      "opacity": 100,
-      "groupIds": [],
-      "frameId": null,
-      "roundness": {
-        "type": 2
-      },
-      "seed": 1211,
-      "version": 1,
-      "versionNonce": 1211,
-      "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
-      "link": null,
-      "locked": false,
-      "points": [
-        [
-          0,
-          0
-        ],
-        [
-          60,
-          0.0
-        ]
-      ],
-      "lastCommittedPoint": null,
-      "startBinding": {
-        "elementId": "config",
-        "focus": 0,
-        "gap": 1
-      },
-      "endBinding": {
-        "elementId": "skill",
-        "focus": 0,
-        "gap": 1
-      },
-      "startArrowhead": null,
-      "endArrowhead": "arrow"
-    },
-    {
-      "id": "a_skill_codex",
-      "type": "arrow",
-      "x": 750,
-      "y": 161.0,
-      "width": 60,
-      "height": 0.0,
-      "angle": 0,
-      "strokeColor": "#1e1e1e",
-      "backgroundColor": "transparent",
-      "fillStyle": "solid",
-      "strokeWidth": 2,
-      "strokeStyle": "solid",
-      "roughness": 1,
-      "opacity": 100,
-      "groupIds": [],
-      "frameId": null,
-      "roundness": {
-        "type": 2
-      },
-      "seed": 1212,
-      "version": 1,
-      "versionNonce": 1212,
-      "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
-      "link": null,
-      "locked": false,
-      "points": [
-        [
-          0,
-          0
-        ],
-        [
-          60,
-          0.0
-        ]
-      ],
-      "lastCommittedPoint": null,
-      "startBinding": {
-        "elementId": "skill",
-        "focus": 0,
-        "gap": 1
-      },
-      "endBinding": {
-        "elementId": "codex",
-        "focus": 0,
-        "gap": 1
-      },
-      "startArrowhead": null,
-      "endArrowhead": "arrow"
     },
     {
       "id": "prefilter",
       "type": "rectangle",
-      "x": 190,
-      "y": 310,
-      "width": 210,
-      "height": 86,
+      "x": 560,
+      "y": 130,
+      "width": 190,
+      "height": 90,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "#fff9db",
@@ -522,9 +208,9 @@
       "roundness": {
         "type": 3
       },
-      "seed": 1213,
+      "seed": 2006,
       "version": 1,
-      "versionNonce": 1213,
+      "versionNonce": 2006,
       "isDeleted": false,
       "boundElements": [
         {
@@ -532,11 +218,15 @@
           "type": "text"
         },
         {
-          "id": "a_codex_prefilter",
+          "id": "a_skill_prefilter",
           "type": "arrow"
         },
         {
           "id": "a_prefilter_approve",
+          "type": "arrow"
+        },
+        {
+          "id": "a_prefilter_note",
           "type": "arrow"
         }
       ],
@@ -547,10 +237,10 @@
     {
       "id": "prefilter_t",
       "type": "text",
-      "x": 200,
-      "y": 320,
-      "width": 190,
-      "height": 66,
+      "x": 570,
+      "y": 140,
+      "width": 170,
+      "height": 70,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -562,16 +252,16 @@
       "groupIds": [],
       "frameId": null,
       "roundness": null,
-      "seed": 1214,
+      "seed": 2007,
       "version": 1,
-      "versionNonce": 1214,
+      "versionNonce": 2007,
       "isDeleted": false,
       "boundElements": null,
       "updated": 1,
       "link": null,
       "locked": false,
       "text": "Prefilter\nbrief + web query",
-      "fontSize": 16,
+      "fontSize": 18,
       "fontFamily": 1,
       "textAlign": "center",
       "verticalAlign": "middle",
@@ -582,10 +272,10 @@
     {
       "id": "approve",
       "type": "rectangle",
-      "x": 455,
-      "y": 310,
-      "width": 210,
-      "height": 86,
+      "x": 825,
+      "y": 130,
+      "width": 180,
+      "height": 90,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "#e3fafc",
@@ -599,9 +289,9 @@
       "roundness": {
         "type": 3
       },
-      "seed": 1215,
+      "seed": 2008,
       "version": 1,
-      "versionNonce": 1215,
+      "versionNonce": 2008,
       "isDeleted": false,
       "boundElements": [
         {
@@ -624,10 +314,10 @@
     {
       "id": "approve_t",
       "type": "text",
-      "x": 465,
-      "y": 320,
-      "width": 190,
-      "height": 66,
+      "x": 835,
+      "y": 140,
+      "width": 160,
+      "height": 70,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -639,16 +329,16 @@
       "groupIds": [],
       "frameId": null,
       "roundness": null,
-      "seed": 1216,
+      "seed": 2009,
       "version": 1,
-      "versionNonce": 1216,
+      "versionNonce": 2009,
       "isDeleted": false,
       "boundElements": null,
       "updated": 1,
       "link": null,
       "locked": false,
       "text": "Approve\nчеловек подтверждает",
-      "fontSize": 16,
+      "fontSize": 18,
       "fontFamily": 1,
       "textAlign": "center",
       "verticalAlign": "middle",
@@ -659,10 +349,10 @@
     {
       "id": "research",
       "type": "rectangle",
-      "x": 720,
-      "y": 310,
-      "width": 210,
-      "height": 86,
+      "x": 430,
+      "y": 330,
+      "width": 220,
+      "height": 95,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "#f8f9fa",
@@ -676,9 +366,9 @@
       "roundness": {
         "type": 3
       },
-      "seed": 1217,
+      "seed": 2010,
       "version": 1,
-      "versionNonce": 1217,
+      "versionNonce": 2010,
       "isDeleted": false,
       "boundElements": [
         {
@@ -701,10 +391,10 @@
     {
       "id": "research_t",
       "type": "text",
-      "x": 730,
-      "y": 320,
-      "width": 190,
-      "height": 66,
+      "x": 440,
+      "y": 340,
+      "width": 200,
+      "height": 75,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -716,16 +406,16 @@
       "groupIds": [],
       "frameId": null,
       "roundness": null,
-      "seed": 1218,
+      "seed": 2011,
       "version": 1,
-      "versionNonce": 1218,
+      "versionNonce": 2011,
       "isDeleted": false,
       "boundElements": null,
       "updated": 1,
       "link": null,
       "locked": false,
       "text": "Deep research\nweb sources + synthesis",
-      "fontSize": 16,
+      "fontSize": 18,
       "fontFamily": 1,
       "textAlign": "center",
       "verticalAlign": "middle",
@@ -734,12 +424,50 @@
       "lineHeight": 1.15
     },
     {
-      "id": "a_codex_prefilter",
-      "type": "arrow",
-      "x": 905.0,
-      "y": 202,
-      "width": -610.0,
-      "height": 108,
+      "id": "report",
+      "type": "rectangle",
+      "x": 735,
+      "y": 330,
+      "width": 220,
+      "height": 95,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#d3f9d8",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": {
+        "type": 3
+      },
+      "seed": 2012,
+      "version": 1,
+      "versionNonce": 2012,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "report_t",
+          "type": "text"
+        },
+        {
+          "id": "a_research_report",
+          "type": "arrow"
+        }
+      ],
+      "updated": 1,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "report_t",
+      "type": "text",
+      "x": 745,
+      "y": 340,
+      "width": 200,
+      "height": 75,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -750,47 +478,30 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "roundness": {
-        "type": 2
-      },
-      "seed": 1219,
+      "roundness": null,
+      "seed": 2013,
       "version": 1,
-      "versionNonce": 1219,
+      "versionNonce": 2013,
       "isDeleted": false,
       "boundElements": null,
       "updated": 1,
       "link": null,
       "locked": false,
-      "points": [
-        [
-          0,
-          0
-        ],
-        [
-          -610.0,
-          108
-        ]
-      ],
-      "lastCommittedPoint": null,
-      "startBinding": {
-        "elementId": "codex",
-        "focus": 0,
-        "gap": 1
-      },
-      "endBinding": {
-        "elementId": "prefilter",
-        "focus": 0,
-        "gap": 1
-      },
-      "startArrowhead": null,
-      "endArrowhead": "arrow"
+      "text": "Markdown report\nготовый файл",
+      "fontSize": 18,
+      "fontFamily": 1,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "report",
+      "originalText": "Markdown report\nготовый файл",
+      "lineHeight": 1.15
     },
     {
-      "id": "a_prefilter_approve",
+      "id": "a_user_skill",
       "type": "arrow",
-      "x": 400,
-      "y": 353.0,
-      "width": 55,
+      "x": 240,
+      "y": 175.0,
+      "width": 70,
       "height": 0.0,
       "angle": 0,
       "strokeColor": "#1e1e1e",
@@ -805,9 +516,9 @@
       "roundness": {
         "type": 2
       },
-      "seed": 1220,
+      "seed": 2014,
       "version": 1,
-      "versionNonce": 1220,
+      "versionNonce": 2014,
       "isDeleted": false,
       "boundElements": null,
       "updated": 1,
@@ -819,7 +530,111 @@
           0
         ],
         [
-          55,
+          70,
+          0.0
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "user",
+        "focus": 0,
+        "gap": 1
+      },
+      "endBinding": {
+        "elementId": "skill",
+        "focus": 0,
+        "gap": 1
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow"
+    },
+    {
+      "id": "a_skill_prefilter",
+      "type": "arrow",
+      "x": 490,
+      "y": 175.0,
+      "width": 70,
+      "height": 0.0,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": {
+        "type": 2
+      },
+      "seed": 2015,
+      "version": 1,
+      "versionNonce": 2015,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          70,
+          0.0
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "skill",
+        "focus": 0,
+        "gap": 1
+      },
+      "endBinding": {
+        "elementId": "prefilter",
+        "focus": 0,
+        "gap": 1
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow"
+    },
+    {
+      "id": "a_prefilter_approve",
+      "type": "arrow",
+      "x": 750,
+      "y": 175.0,
+      "width": 75,
+      "height": 0.0,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": {
+        "type": 2
+      },
+      "seed": 2016,
+      "version": 1,
+      "versionNonce": 2016,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          75,
           0.0
         ]
       ],
@@ -840,10 +655,10 @@
     {
       "id": "a_approve_research",
       "type": "arrow",
-      "x": 665,
-      "y": 353.0,
-      "width": 55,
-      "height": 0.0,
+      "x": 915.0,
+      "y": 220,
+      "width": -375.0,
+      "height": 110,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -857,9 +672,9 @@
       "roundness": {
         "type": 2
       },
-      "seed": 1221,
+      "seed": 2017,
       "version": 1,
-      "versionNonce": 1221,
+      "versionNonce": 2017,
       "isDeleted": false,
       "boundElements": null,
       "updated": 1,
@@ -871,8 +686,8 @@
           0
         ],
         [
-          55,
-          0.0
+          -375.0,
+          110
         ]
       ],
       "lastCommittedPoint": null,
@@ -890,85 +705,12 @@
       "endArrowhead": "arrow"
     },
     {
-      "id": "report",
-      "type": "rectangle",
-      "x": 455,
-      "y": 500,
-      "width": 250,
-      "height": 82,
-      "angle": 0,
-      "strokeColor": "#1e1e1e",
-      "backgroundColor": "#d3f9d8",
-      "fillStyle": "solid",
-      "strokeWidth": 2,
-      "strokeStyle": "solid",
-      "roughness": 1,
-      "opacity": 100,
-      "groupIds": [],
-      "frameId": null,
-      "roundness": {
-        "type": 3
-      },
-      "seed": 1222,
-      "version": 1,
-      "versionNonce": 1222,
-      "isDeleted": false,
-      "boundElements": [
-        {
-          "id": "report_t",
-          "type": "text"
-        },
-        {
-          "id": "a_research_report",
-          "type": "arrow"
-        }
-      ],
-      "updated": 1,
-      "link": null,
-      "locked": false
-    },
-    {
-      "id": "report_t",
-      "type": "text",
-      "x": 465,
-      "y": 510,
-      "width": 230,
-      "height": 62,
-      "angle": 0,
-      "strokeColor": "#1e1e1e",
-      "backgroundColor": "transparent",
-      "fillStyle": "solid",
-      "strokeWidth": 2,
-      "strokeStyle": "solid",
-      "roughness": 1,
-      "opacity": 100,
-      "groupIds": [],
-      "frameId": null,
-      "roundness": null,
-      "seed": 1223,
-      "version": 1,
-      "versionNonce": 1223,
-      "isDeleted": false,
-      "boundElements": null,
-      "updated": 1,
-      "link": null,
-      "locked": false,
-      "text": "Markdown report\n~/Downloads",
-      "fontSize": 18,
-      "fontFamily": 1,
-      "textAlign": "center",
-      "verticalAlign": "middle",
-      "containerId": "report",
-      "originalText": "Markdown report\n~/Downloads",
-      "lineHeight": 1.15
-    },
-    {
       "id": "a_research_report",
       "type": "arrow",
-      "x": 825.0,
-      "y": 396,
-      "width": -245.0,
-      "height": 104,
+      "x": 650,
+      "y": 377.5,
+      "width": 85,
+      "height": 0.0,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -982,9 +724,9 @@
       "roundness": {
         "type": 2
       },
-      "seed": 1224,
+      "seed": 2018,
       "version": 1,
-      "versionNonce": 1224,
+      "versionNonce": 2018,
       "isDeleted": false,
       "boundElements": null,
       "updated": 1,
@@ -996,8 +738,8 @@
           0
         ],
         [
-          -245.0,
-          104
+          85,
+          0.0
         ]
       ],
       "lastCommittedPoint": null,
@@ -1018,12 +760,12 @@
       "id": "note",
       "type": "rectangle",
       "x": 60,
-      "y": 500,
-      "width": 280,
-      "height": 82,
+      "y": 330,
+      "width": 260,
+      "height": 95,
       "angle": 0,
       "strokeColor": "#1e1e1e",
-      "backgroundColor": "#f8f9fa",
+      "backgroundColor": "#f3f0ff",
       "fillStyle": "solid",
       "strokeWidth": 2,
       "strokeStyle": "solid",
@@ -1034,9 +776,9 @@
       "roundness": {
         "type": 3
       },
-      "seed": 1225,
+      "seed": 2019,
       "version": 1,
-      "versionNonce": 1225,
+      "versionNonce": 2019,
       "isDeleted": false,
       "boundElements": [
         {
@@ -1044,7 +786,7 @@
           "type": "text"
         },
         {
-          "id": "a_skill_note",
+          "id": "a_prefilter_note",
           "type": "arrow"
         }
       ],
@@ -1056,9 +798,9 @@
       "id": "note_t",
       "type": "text",
       "x": 70,
-      "y": 510,
-      "width": 260,
-      "height": 62,
+      "y": 340,
+      "width": 240,
+      "height": 75,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -1070,30 +812,30 @@
       "groupIds": [],
       "frameId": null,
       "roundness": null,
-      "seed": 1226,
+      "seed": 2020,
       "version": 1,
-      "versionNonce": 1226,
+      "versionNonce": 2020,
       "isDeleted": false,
       "boundElements": null,
       "updated": 1,
       "link": null,
       "locked": false,
-      "text": "Skill не пишет статью сам\nон запускает controlled research workflow",
+      "text": "Идея:\nсначала проверить запрос,\nпотом запускать платный web research",
       "fontSize": 15,
       "fontFamily": 1,
       "textAlign": "center",
       "verticalAlign": "middle",
       "containerId": "note",
-      "originalText": "Skill не пишет статью сам\nон запускает controlled research workflow",
+      "originalText": "Идея:\nсначала проверить запрос,\nпотом запускать платный web research",
       "lineHeight": 1.15
     },
     {
-      "id": "a_skill_note",
+      "id": "a_prefilter_note",
       "type": "arrow",
       "x": 655.0,
-      "y": 202,
-      "width": -455.0,
-      "height": 298,
+      "y": 220,
+      "width": -465.0,
+      "height": 110,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -1107,9 +849,9 @@
       "roundness": {
         "type": 2
       },
-      "seed": 1227,
+      "seed": 2021,
       "version": 1,
-      "versionNonce": 1227,
+      "versionNonce": 2021,
       "isDeleted": false,
       "boundElements": null,
       "updated": 1,
@@ -1121,13 +863,13 @@
           0
         ],
         [
-          -455.0,
-          298
+          -465.0,
+          110
         ]
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "elementId": "skill",
+        "elementId": "prefilter",
         "focus": 0,
         "gap": 1
       },
