@@ -1,30 +1,28 @@
 # Local GPT Researcher Runner
 
-This repo is a local wrapper around GPT Researcher.
+This repo contains a local research runner plus a bundled, modified GPT Researcher codebase.
+It is based on GPT Researcher and includes local changes for this workflow.
 
 Project layout:
 
-- `deep-research-codex/` - this repo
-- `deep-research-codex/gpt-researcher/` - separate GPT Researcher checkout
+- `./research.sh` - local runner entrypoint
+- `./scripts/` - helper scripts
+- `./gpt-researcher/` - bundled GPT Researcher source code used by the runner
 
 ## Setup
 
 ```bash
 git clone https://github.com/mikemelanin/deep-research-codex.git
 cd deep-research-codex
-
-# clone GPT Researcher into the expected subfolder
-git clone https://github.com/assafelovic/gpt-researcher.git gpt-researcher
-
 cp .env.example .env
 # Fill values in .env
 ```
 
 Important:
 
-- this repo does not include the GPT Researcher source code
-- `gpt-researcher/` is intentionally ignored in `.gitignore`
-- the runner expects GPT Researcher at `./gpt-researcher`
+- GPT Researcher source code is already included in this repo
+- local secrets still belong only in `.env`
+- the runner uses the bundled code at `./gpt-researcher`
 
 ## Required keys and access
 

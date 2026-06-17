@@ -18,6 +18,3 @@ __pycache__/
 .research.lock.d/
 .research.lock.meta
 .DS_Store
-
-# upstream cloned app repo (managed separately)
-gpt-researcher/
