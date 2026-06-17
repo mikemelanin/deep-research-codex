@@ -1,139 +1,154 @@
-# Local GPT Researcher Runner
+# Deep Research Codex
 
-This repo contains a local research runner plus a bundled, modified GPT Researcher codebase.
-It is based on GPT Researcher and includes local changes for this workflow.
+Локальный раннер для research-задач поверх GPT Researcher.
 
-Project layout:
+Внутри репозитория уже лежит встроенная и модифицированная версия `gpt-researcher`, а сверху добавлен локальный workflow для более управляемого запуска:
 
-- `./research.sh` - local runner entrypoint
-- `./scripts/` - helper scripts
-- `./gpt-researcher/` - bundled GPT Researcher source code used by the runner
+- нормализация запроса через prefilter
+- подтверждение brief/query перед платным web research
+- запуск deep research с локальными настройками
+- сохранение итогового markdown-отчета
+- опциональный перевод финального отчета на русский
 
-## Setup
+Проект основан на GPT Researcher, но содержит локальные изменения под этот сценарий работы.
+
+## Что лежит в репозитории
+
+- `research.sh` - основной вход для запуска исследования
+- `scripts/` - вспомогательные скрипты
+- `gpt-researcher/` - встроенный исходный код GPT Researcher
+- `.env.example` - пример конфигурации
+
+## Установка
 
 ```bash
 git clone https://github.com/mikemelanin/deep-research-codex.git
 cd deep-research-codex
 cp .env.example .env
-# Fill values in .env
 ```
 
-Important:
+После этого заполни `.env`.
 
-- GPT Researcher source code is already included in this repo
-- local secrets still belong only in `.env`
-- the runner uses the bundled code at `./gpt-researcher`
+Важно:
 
-## Required keys and access
+- секреты должны лежать только в `.env`
+- файл `.env` не должен попадать в git
+- встроенный `gpt-researcher` уже включен в этот репозиторий, отдельно скачивать его не нужно
 
-- `TAVILY_API_KEY`: create at https://app.tavily.com
-- AWS Bedrock access to Claude model in your selected region
+## Что нужно для запуска
 
-You must set in `.env`:
+- `TAVILY_API_KEY`
+- доступ к AWS Bedrock
+- модель Claude, доступная через Bedrock в нужном регионе
+
+В `.env` должны быть настроены:
 
 - `RETRIEVER=tavily`
-- `FAST_LLM`, `SMART_LLM`, `STRATEGIC_LLM` as `bedrock:<model_id>`
+- `FAST_LLM`, `SMART_LLM`, `STRATEGIC_LLM` в формате `bedrock:<model_id>`
 - `EMBEDDING=bedrock:amazon.titan-embed-text-v2:0`
-- AWS auth (`AWS_PROFILE` or key pair)
+- AWS-аутентификация: либо `AWS_PROFILE`, либо пара ключей
 - `AWS_DEFAULT_REGION`
 
-## Run research
+## Быстрый запуск
+
+Обычный запуск:
 
 ```bash
-./research.sh "Your topic here"
+./research.sh "Тема исследования"
 ```
 
-Default behavior:
+По умолчанию раннер:
 
-- runs deep research with the local default profile (`4/2/4`)
-- saves the final report in English
+- запускает deep research
+- использует локальный профиль по умолчанию `4/2/4`
+- сохраняет итоговый отчет на английском
 
-Translate the final report to Russian:
+Сразу получить русский итоговый отчет:
 
 ```bash
-./research.sh --ru "Your topic here"
+./research.sh --ru "Тема исследования"
 ```
 
-Prepare normalized brief/query only:
+## Полезные режимы
+
+Сделать только prefilter и сохранить артефакт:
 
 ```bash
-./research.sh --prefilter-only "Your topic here"
+./research.sh --prefilter-only "Тема исследования"
 ```
 
-Continue from saved prefilter artifact:
+Продолжить из уже сохраненного prefilter-артефакта:
 
 ```bash
 ./research.sh --from-prefilter "./logs/YYYYMMDD-HHMMSS-prefilter.json"
 ```
 
-Legacy compatibility flags still work, but are no longer the main path:
+Пропустить подтверждение brief/query:
 
 ```bash
-./research.sh --deep "Your topic here"
-./research.sh --no-translate "Your topic here"
-./research.sh --en "Your topic here"
+./research.sh --yes "Тема исследования"
 ```
 
-Skip confirmation prompt:
-
-```bash
-./research.sh --yes "Your topic here"
-```
-
-Run from a markdown note (file is used as query input only):
+Передать markdown-файл как входной запрос:
 
 ```bash
 ./research.sh --file "./context.md"
 ```
 
-Shortcut: pass `.md` path directly (without `--file`):
+Короткий вариант без `--file`:
 
 ```bash
 ./research.sh "./context.md"
 ```
 
-How pipeline works now:
-
-- input (`inline text` or `file_as_query`) is treated as raw request
-- prefilter LLM rewrites it into `# Research task` markdown + compact web query
-- `--prefilter-only` stops after that step and saves a reusable artifact in `logs/`
-- `--from-prefilter` resumes from saved normalized query without repeating prefilter
-- in interactive terminal runs, script asks to confirm normalized brief/query before paid web research starts
-- GPT Researcher always runs with `report_source=web`
-- default report type is `deep`
-- markdown file is not loaded as local context source for report generation
-
-Output file format:
-
-- final saved report: `~/Downloads/YYYY-MM-DD-topic.md` in English by default
-- `--ru` translates the final saved report to Russian
-- source English report: `gpt-researcher/outputs/<uuid>.md`
-
-Phase diagnostics in run log:
-
-- `phase_start name=...`
-- `phase_done name=... duration_s=... reason=...`
-
-`research.sh` performs preflight checks:
-
-- `.env` exists
-- `TAVILY_API_KEY` exists
-- Bedrock settings use `bedrock:` models
-- AWS creds and region are valid
-- Claude model is callable via Bedrock
-- only one run can be active at a time; concurrent second start is rejected
-
-## Compare deep profiles
-
-Run the built-in comparison runner on one topic with one shared prefilter artifact:
+Старые флаги совместимости тоже работают:
 
 ```bash
-./.venv/bin/python scripts/compare_deep_profiles.py "Your topic here"
+./research.sh --deep "Тема исследования"
+./research.sh --no-translate "Тема исследования"
+./research.sh --en "Тема исследования"
 ```
 
-What it does:
+## Как устроен workflow
 
-- generates one reusable `prefilter.json`
-- runs three deep profiles on the same normalized query
-- saves per-profile `report/log/telemetry`
-- writes `comparison-summary.md` and `comparison-summary.json` under `logs/<timestamp>-deep-compare-.../`
+1. Входной текст или markdown-файл воспринимается как сырой запрос.
+2. Prefilter LLM превращает его в нормализованный `Research task` и короткий web query.
+3. В интерактивном запуске раннер просит подтвердить результат prefilter перед платным поиском.
+4. После подтверждения запускается GPT Researcher с `report_source=web`.
+5. Итоговый отчет сохраняется в markdown.
+6. Если указан `--ru`, после этого делается перевод финального отчета на русский.
+
+Важно:
+
+- по умолчанию используется тип отчета `deep`
+- markdown-файл не подмешивается как локальный knowledge source, а используется как текст запроса
+
+## Куда сохраняются результаты
+
+- итоговый отчет по умолчанию: `~/Downloads/YYYY-MM-DD-topic.md`
+- исходный английский отчет GPT Researcher: `gpt-researcher/outputs/<uuid>.md`
+- логи и prefilter-артефакты: `./logs/`
+
+## Что проверяет `research.sh` перед запуском
+
+- существует `.env`
+- задан `TAVILY_API_KEY`
+- Bedrock-модели указаны в формате `bedrock:...`
+- AWS-креды и регион валидны
+- модель Claude реально вызывается через Bedrock
+- одновременно может идти только один запуск
+
+## Сравнение deep-профилей
+
+Можно прогнать встроенное сравнение нескольких deep-профилей на одной теме:
+
+```bash
+./.venv/bin/python scripts/compare_deep_profiles.py "Тема исследования"
+```
+
+Этот сценарий:
+
+- создает один общий `prefilter.json`
+- запускает три deep-профиля на одном и том же нормализованном запросе
+- сохраняет отдельные `report/log/telemetry`
+- пишет `comparison-summary.md` и `comparison-summary.json` в `logs/<timestamp>-deep-compare-.../`
