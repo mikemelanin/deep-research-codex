@@ -1,14 +1,30 @@
 # Local GPT Researcher Runner
 
-Root: `/Users/melanin/Vibecoding/projects/deep-research-codex`
+This repo is a local wrapper around GPT Researcher.
+
+Project layout:
+
+- `deep-research-codex/` - this repo
+- `deep-research-codex/gpt-researcher/` - separate GPT Researcher checkout
 
 ## Setup
 
 ```bash
-cd /Users/melanin/Vibecoding/projects/deep-research-codex
+git clone https://github.com/mikemelanin/deep-research-codex.git
+cd deep-research-codex
+
+# clone GPT Researcher into the expected subfolder
+git clone https://github.com/assafelovic/gpt-researcher.git gpt-researcher
+
 cp .env.example .env
 # Fill values in .env
 ```
+
+Important:
+
+- this repo does not include the GPT Researcher source code
+- `gpt-researcher/` is intentionally ignored in `.gitignore`
+- the runner expects GPT Researcher at `./gpt-researcher`
 
 ## Required keys and access
 
@@ -49,7 +65,7 @@ Prepare normalized brief/query only:
 Continue from saved prefilter artifact:
 
 ```bash
-./research.sh --from-prefilter "/absolute/path/to/logs/YYYYMMDD-HHMMSS-prefilter.json"
+./research.sh --from-prefilter "./logs/YYYYMMDD-HHMMSS-prefilter.json"
 ```
 
 Legacy compatibility flags still work, but are no longer the main path:
@@ -69,13 +85,13 @@ Skip confirmation prompt:
 Run from a markdown note (file is used as query input only):
 
 ```bash
-./research.sh --file "/Users/melanin/Downloads/context.md"
+./research.sh --file "./context.md"
 ```
 
 Shortcut: pass `.md` path directly (without `--file`):
 
 ```bash
-./research.sh "/Users/melanin/Downloads/context.md"
+./research.sh "./context.md"
 ```
 
 How pipeline works now:
