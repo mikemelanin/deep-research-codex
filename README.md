@@ -2,25 +2,39 @@
 
 Локальный раннер для research-задач поверх [GPT Researcher](https://github.com/assafelovic/gpt-researcher).
 
-Внутри репозитория уже лежит встроенная и модифицированная версия оригинального `gpt-researcher`, а сверху добавлен локальный workflow для более управляемого запуска:
+Идея проекта - сделать локальный аналог Deep Research-режима из ChatGPT и Claude, но запускать его из Codex как skill:
 
-- нормализация запроса через prefilter
-- подтверждение brief/query перед платным web research
-- запуск deep research с локальными настройками
-- сохранение итогового markdown-отчета
-- опциональный перевод финального отчета на русский
+- Codex принимает research-задачу обычным языком
+- prefilter превращает ее в понятный brief и web query
+- человек подтверждает запрос перед платным поиском
+- GPT Researcher делает deep research по web-источникам
+- результат сохраняется как markdown-файл
 
-Проект основан на GPT Researcher, но упакован как более удобный рабочий контур для Codex: агент сначала помогает сформулировать задачу, затем запускает исследование и возвращает готовый markdown-отчет.
+Внутри репозитория уже лежит встроенная и модифицированная версия оригинального `gpt-researcher`, а сверху добавлен `research.sh` и Codex skill.
 
 ## Зачем это
 
-Это попытка собрать локальный аналог Deep Research-режима, который есть в ChatGPT и Claude, но с большим контролем над процессом:
+Это нужно, когда хочется похожий на Deep Research workflow, но локально и с большим контролем:
 
-- research запускается из Codex как skill
-- перед платным поиском можно проверить и подтвердить нормализованный запрос
+- можно использовать свои API-ключи
 - параметры глубины, ширины и лимитов лежат в локальной конфигурации
 - результат сохраняется как обычный markdown-файл
 - workflow меньше зависит от ограничений конкретного web-интерфейса
+
+## Что нужно из API
+
+Поиск сейчас идет через [Tavily](https://app.tavily.com):
+
+- `TAVILY_API_KEY`
+
+LLM-вызовы в этом wrapper из коробки рассчитаны на AWS Bedrock:
+
+- `FAST_LLM`, `SMART_LLM`, `STRATEGIC_LLM` в формате `bedrock:<model_id>`
+- `EMBEDDING=bedrock:amazon.titan-embed-text-v2:0`
+- `AWS_DEFAULT_REGION`
+- один из вариантов авторизации: `AWS_PROFILE`, AWS key pair или `AWS_BEARER_TOKEN_BEDROCK`
+
+Оригинальный GPT Researcher поддерживает много LLM-провайдеров: OpenAI, Anthropic, Azure OpenAI, Google, Groq, Mistral, OpenRouter, Ollama, Bedrock и другие. Но текущий `research.sh` проверяет именно `bedrock:*` модели, потому что локальный workflow тестировался и настраивался под Bedrock/Claude.
 
 ## Что лежит в репозитории
 
@@ -40,7 +54,7 @@ python3 -m venv .venv
 cp .env.example .env
 ```
 
-После этого заполни локальный конфиг в `.env`: туда кладутся ключи Tavily и доступ к AWS Bedrock.
+После этого заполни `.env` своими ключами Tavily и доступом к AWS Bedrock.
 
 Важно:
 
@@ -50,7 +64,7 @@ cp .env.example .env
 
 ## Установка как Codex skill
 
-Чтобы Codex мог запускать этот workflow как skill:
+Чтобы Codex мог запускать workflow как skill:
 
 ```bash
 mkdir -p ~/.codex/skills
@@ -161,15 +175,6 @@ flowchart LR
 - итоговый отчет по умолчанию: `~/Downloads/YYYY-MM-DD-topic.md`
 - исходный английский отчет GPT Researcher: `gpt-researcher/outputs/<uuid>.md`
 - логи и prefilter-артефакты: `./logs/`
-
-## Что проверяет `research.sh` перед запуском
-
-- существует `.env`
-- задан `TAVILY_API_KEY`
-- Bedrock-модели указаны в формате `bedrock:...`
-- AWS-креды и регион валидны
-- модель Claude реально вызывается через Bedrock
-- одновременно может идти только один запуск
 
 ## Сравнение deep-профилей
 
