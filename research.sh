@@ -118,6 +118,13 @@ if [[ ! -f "$ROOT_DIR/.venv/bin/activate" ]]; then
   echo "Error: virtualenv not found. Create it first: python3 -m venv .venv"
   exit 1
 fi
+
+PYTHON_BIN="$ROOT_DIR/.venv/bin/python"
+if [[ ! -x "$PYTHON_BIN" ]]; then
+  echo "Error: python executable not found in virtualenv: $PYTHON_BIN"
+  exit 1
+fi
+
 source "$ROOT_DIR/.venv/bin/activate"
 
 if [[ -f "$ENV_FILE" ]]; then
@@ -384,7 +391,7 @@ if [[ -n "$LEGACY_LANGUAGE_FLAG" ]]; then
 fi
 
 BEDROCK_MODEL_ID="${SMART_LLM#bedrock:}"
-python - <<'PY'
+"$PYTHON_BIN" - <<'PY'
 import os
 import sys
 import boto3
@@ -424,7 +431,7 @@ if [[ -z "$FROM_PREFILTER" ]]; then
   PREFILTER_INPUT_MODE="$( [[ -n "$INPUT_FILE" ]] && echo file_as_query || echo inline_text )"
   PREFILTER_INPUT_FILE="${INPUT_FILE:-}"
   log_ts "prefilter_start input=$PREFILTER_INPUT_MODE"
-  python "$PREFILTER_SCRIPT" "$RAW_INPUT_FILE" "$PREFILTER_BRIEF_FILE" "$PREFILTER_QUERY_FILE" | tee -a "$RUN_LOG"
+  "$PYTHON_BIN" "$PREFILTER_SCRIPT" "$RAW_INPUT_FILE" "$PREFILTER_BRIEF_FILE" "$PREFILTER_QUERY_FILE" | tee -a "$RUN_LOG"
 
   QUERY="$(tr -d '\r' < "$PREFILTER_QUERY_FILE" | head -n 1 | sed 's/[[:space:]]\+$//')"
   if [[ -z "$QUERY" ]]; then
@@ -543,7 +550,7 @@ echo "Run log: $RUN_LOG"
 
 run_cli_with_timeout() {
   local timeout_sec="$1"
-  python "$RUN_CLI_SCRIPT" "$APP_DIR" "$QUERY" "$timeout_sec" "$RAW_OUTPUT_FILE"
+  "$PYTHON_BIN" "$RUN_CLI_SCRIPT" "$APP_DIR" "$QUERY" "$timeout_sec" "$RAW_OUTPUT_FILE"
 }
 
 phase_start "research_web"
@@ -580,7 +587,7 @@ fi
 
 echo "source_report=$SRC_REPORT" >> "$RUN_LOG"
 
-SLUG="$(python - "$QUERY" <<'PY'
+SLUG="$("$PYTHON_BIN" - "$QUERY" <<'PY'
 import re
 import sys
 q = sys.argv[1].strip().lower()
@@ -594,7 +601,7 @@ DEST_REPORT="$REPORTS_DIR/${DATE_STR}-${SLUG}.md"
 if [[ "$TRANSLATE_TO_RU" -eq 1 ]]; then
   phase_start "translation_ru"
   log_ts "translation_start mode=ru"
-  python "$TRANSLATE_SCRIPT" "$SRC_REPORT" "$DEST_REPORT" | tee -a "$RUN_LOG"
+  "$PYTHON_BIN" "$TRANSLATE_SCRIPT" "$SRC_REPORT" "$DEST_REPORT" | tee -a "$RUN_LOG"
   log_ts "translation_done"
   phase_done "translation_ru" "success"
 else

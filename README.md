@@ -1,11 +1,11 @@
 # Local GPT Researcher Runner
 
-Root: `/Users/melanin/Vibecoding/projects/gpt-researcher`
+Root: `/Users/melanin/Vibecoding/projects/deep-research-codex`
 
 ## Setup
 
 ```bash
-cd /Users/melanin/Vibecoding/projects/gpt-researcher
+cd /Users/melanin/Vibecoding/projects/deep-research-codex
 cp .env.example .env
 # Fill values in .env
 ```
