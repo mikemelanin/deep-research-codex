@@ -27,34 +27,47 @@ flowchart TD
   E4 --> SQ42["Subquery 2:<br/>что с безопасностью данных?"]
   E4 --> SQ43["Subquery 3:<br/>где нужны правила и аудит?"]
 
-  SQ11 --> P1["Результат Query 1:<br/>источники + выжимка<br/>вопрос: «где ROI быстрее?»"]
-  SQ12 --> P1
-  SQ13 --> P1
+  SQ11 --> P["Результат каждой Query:<br/>источники + выжимка + follow-up вопрос"]
+  SQ12 --> P
+  SQ13 --> P
 
-  SQ21 --> P2["Результат Query 2:<br/>источники + выжимка<br/>вопрос: «где AI портит UX?»"]
-  SQ22 --> P2
-  SQ23 --> P2
+  SQ21 --> P
+  SQ22 --> P
+  SQ23 --> P
 
-  SQ31 --> P3["Результат Query 3:<br/>источники + выжимка<br/>вопрос: «какие интеграции критичны?»"]
-  SQ32 --> P3
-  SQ33 --> P3
+  SQ31 --> P
+  SQ32 --> P
+  SQ33 --> P
 
-  SQ41 --> P4["Результат Query 4:<br/>источники + выжимка<br/>вопрос: «какие guardrails работают?»"]
-  SQ42 --> P4
-  SQ43 --> P4
+  SQ41 --> P
+  SQ42 --> P
+  SQ43 --> P
 
-  P1 --> R1["Depth 2 для Query 1:<br/>follow-up становится новым входом"]
-  P2 --> R2["Depth 2 для Query 2:<br/>follow-up становится новым входом"]
-  P3 --> R3["Depth 2 для Query 3:<br/>follow-up становится новым входом"]
-  P4 --> R4["Depth 2 для Query 4:<br/>follow-up становится новым входом"]
+  P --> F1["Follow-up от Query 1:<br/>«где ROI появляется быстрее всего?»"]
+  P --> F2["Follow-up от Query 2:<br/>«где AI ухудшает клиентский опыт?»"]
+  P --> F3["Follow-up от Query 3:<br/>«какие интеграции критичны?»"]
+  P --> F4["Follow-up от Query 4:<br/>«какие guardrails работают?»"]
 
-  R1 --> N1["На втором уровне:<br/>создать 2 новых Query<br/>и внутри них снова subqueries"]
-  R2 --> N2["На втором уровне:<br/>создать 2 новых Query<br/>и внутри них снова subqueries"]
-  R3 --> N3["На втором уровне:<br/>создать 2 новых Query<br/>и внутри них снова subqueries"]
-  R4 --> N4["На втором уровне:<br/>создать 2 новых Query<br/>и внутри них снова subqueries"]
+  F1 --> D2A["Depth 2 пример для Query 1:<br/>breadth уменьшается 4 → 2"]
 
-  N1 --> J["Общий контекст:<br/>источники + цитаты + выжимки"]
-  N2 --> J
-  N3 --> J
-  N4 --> J
+  D2A --> Q1A["Новый Query 1 из 2:<br/>«AI support ROI by ticket volume»"]
+  D2A --> Q1B["Новый Query 2 из 2:<br/>«AI support ROI by automation rate»"]
+
+  Q1A --> Q1AS1["Subquery 1:<br/>какой ticket volume окупает AI?"]
+  Q1A --> Q1AS2["Subquery 2:<br/>где больше экономия: SMB или enterprise?"]
+  Q1A --> Q1AS3["Subquery 3:<br/>какие есть публичные ROI benchmarks?"]
+
+  Q1B --> Q1BS1["Subquery 1:<br/>какой % обращений можно автоматизировать?"]
+  Q1B --> Q1BS2["Subquery 2:<br/>как automation rate влияет на cost per ticket?"]
+  Q1B --> Q1BS3["Subquery 3:<br/>какие кейсы показывают payback period?"]
+
+  F2 --> J
+  F3 --> J
+  F4 --> J
+  Q1AS1 --> J["Общий контекст:<br/>источники + цитаты + выжимки"]
+  Q1AS2 --> J
+  Q1AS3 --> J
+  Q1BS1 --> J
+  Q1BS2 --> J
+  Q1BS3 --> J
   J --> K["Финальный markdown-отчет:<br/>структура, выводы, источники"]
