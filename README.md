@@ -10,13 +10,14 @@
 - сохранение итогового markdown-отчета
 - опциональный перевод финального отчета на русский
 
-Проект основан на GPT Researcher, но содержит локальные изменения под этот сценарий работы.
+Проект основан на GPT Researcher, но упакован как более удобный рабочий контур для Codex: агент сначала помогает сформулировать задачу, затем запускает исследование и возвращает готовый markdown-отчет.
 
 ## Что лежит в репозитории
 
 - `research.sh` - основной вход для запуска исследования
 - `scripts/` - вспомогательные скрипты
 - `gpt-researcher/` - встроенный исходный код GPT Researcher
+- `skills/research/` - Codex skill для запуска этого workflow из агента
 - `.env.example` - пример конфигурации
 
 ## Установка
@@ -24,30 +25,43 @@
 ```bash
 git clone https://github.com/mikemelanin/deep-research-codex.git
 cd deep-research-codex
+python3 -m venv .venv
+./.venv/bin/pip install -r gpt-researcher/requirements.txt boto3
 cp .env.example .env
 ```
 
-После этого заполни `.env`.
+После этого заполни локальный конфиг в `.env`: туда кладутся ключи Tavily и доступ к AWS Bedrock.
 
 Важно:
 
-- секреты должны лежать только в `.env`
-- файл `.env` не должен попадать в git
 - встроенный `gpt-researcher` уже включен в этот репозиторий, отдельно скачивать его не нужно
+- `.env` локальный и не публикуется в git
+- по умолчанию результат сохраняется в `~/Downloads`
 
-## Что нужно для запуска
+## Установка как Codex skill
 
-- `TAVILY_API_KEY`
-- доступ к AWS Bedrock
-- модель Claude, доступная через Bedrock в нужном регионе
+Чтобы Codex мог запускать этот workflow как skill:
 
-В `.env` должны быть настроены:
+```bash
+mkdir -p ~/.codex/skills
+cp -R skills/research ~/.codex/skills/research
+```
 
-- `RETRIEVER=tavily`
-- `FAST_LLM`, `SMART_LLM`, `STRATEGIC_LLM` в формате `bedrock:<model_id>`
-- `EMBEDDING=bedrock:amazon.titan-embed-text-v2:0`
-- AWS-аутентификация: либо `AWS_PROFILE`, либо пара ключей
-- `AWS_DEFAULT_REGION`
+Если репозиторий лежит не в `~/deep-research-codex`, укажи путь к нему:
+
+```bash
+export DEEP_RESEARCH_CODEX_HOME="/path/to/deep-research-codex"
+```
+
+После этого в Codex можно просить обычным языком:
+
+```text
+Сделай research по теме ...
+Собери markdown-отчет с источниками ...
+Сделай deep research на русском ...
+```
+
+Skill использует двухшаговый режим: сначала показывает нормализованный brief/query, потом запускает платное web research только после подтверждения.
 
 ## Быстрый запуск
 
