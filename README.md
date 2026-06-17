@@ -1,8 +1,8 @@
 # Deep Research Codex
 
-Локальный раннер для research-задач поверх GPT Researcher.
+Локальный раннер для research-задач поверх [GPT Researcher](https://github.com/assafelovic/gpt-researcher).
 
-Внутри репозитория уже лежит встроенная и модифицированная версия `gpt-researcher`, а сверху добавлен локальный workflow для более управляемого запуска:
+Внутри репозитория уже лежит встроенная и модифицированная версия оригинального `gpt-researcher`, а сверху добавлен локальный workflow для более управляемого запуска:
 
 - нормализация запроса через prefilter
 - подтверждение brief/query перед платным web research
