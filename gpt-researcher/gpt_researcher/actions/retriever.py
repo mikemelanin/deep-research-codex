@@ -4,6 +4,34 @@ This module provides functions to instantiate and manage various
 search retriever implementations.
 """
 
+from importlib import import_module
+
+
+_RETRIEVER_EXPORTS = {
+    "google": ("gpt_researcher.retrievers.google.google", "GoogleSearch"),
+    "searx": ("gpt_researcher.retrievers.searx.searx", "SearxSearch"),
+    "searchapi": ("gpt_researcher.retrievers.searchapi.searchapi", "SearchApiSearch"),
+    "serpapi": ("gpt_researcher.retrievers.serpapi.serpapi", "SerpApiSearch"),
+    "serper": ("gpt_researcher.retrievers.serper.serper", "SerperSearch"),
+    "duckduckgo": ("gpt_researcher.retrievers.duckduckgo.duckduckgo", "Duckduckgo"),
+    "bing": ("gpt_researcher.retrievers.bing.bing", "BingSearch"),
+    "bocha": ("gpt_researcher.retrievers.bocha.bocha", "BoChaSearch"),
+    "arxiv": ("gpt_researcher.retrievers.arxiv.arxiv", "ArxivSearch"),
+    "tavily": ("gpt_researcher.retrievers.tavily.tavily_search", "TavilySearch"),
+    "exa": ("gpt_researcher.retrievers.exa.exa", "ExaSearch"),
+    "semantic_scholar": (
+        "gpt_researcher.retrievers.semantic_scholar.semantic_scholar",
+        "SemanticScholarSearch",
+    ),
+    "pubmed_central": (
+        "gpt_researcher.retrievers.pubmed_central.pubmed_central",
+        "PubMedCentralSearch",
+    ),
+    "custom": ("gpt_researcher.retrievers.custom.custom", "CustomRetriever"),
+    "mcp": ("gpt_researcher.retrievers.mcp", "MCPRetriever"),
+    "xquik": ("gpt_researcher.retrievers.xquik.xquik", "XquikSearch"),
+}
+
 
 def get_retriever(retriever: str):
     """Get a retriever class by name.
@@ -31,74 +59,20 @@ def get_retriever(retriever: str):
         - mcp: Model Context Protocol retriever
         - xquik: Xquik X/Twitter search
     """
-    match retriever:
-        case "google":
-            from gpt_researcher.retrievers import GoogleSearch
+    export = _RETRIEVER_EXPORTS.get(retriever)
+    if export is None:
+        return None
 
-            return GoogleSearch
-        case "searx":
-            from gpt_researcher.retrievers import SearxSearch
-
-            return SearxSearch
-        case "searchapi":
-            from gpt_researcher.retrievers import SearchApiSearch
-
-            return SearchApiSearch
-        case "serpapi":
-            from gpt_researcher.retrievers import SerpApiSearch
-
-            return SerpApiSearch
-        case "serper":
-            from gpt_researcher.retrievers import SerperSearch
-
-            return SerperSearch
-        case "duckduckgo":
-            from gpt_researcher.retrievers import Duckduckgo
-
-            return Duckduckgo
-        case "bing":
-            from gpt_researcher.retrievers import BingSearch
-
-            return BingSearch
-        case "bocha":
-            from gpt_researcher.retrievers import BoChaSearch
-
-            return BoChaSearch
-        case "arxiv":
-            from gpt_researcher.retrievers import ArxivSearch
-
-            return ArxivSearch
-        case "tavily":
-            from gpt_researcher.retrievers import TavilySearch
-
-            return TavilySearch
-        case "exa":
-            from gpt_researcher.retrievers import ExaSearch
-
-            return ExaSearch
-        case "semantic_scholar":
-            from gpt_researcher.retrievers import SemanticScholarSearch
-
-            return SemanticScholarSearch
-        case "pubmed_central":
-            from gpt_researcher.retrievers import PubMedCentralSearch
-
-            return PubMedCentralSearch
-        case "custom":
-            from gpt_researcher.retrievers import CustomRetriever
-
-            return CustomRetriever
-        case "mcp":
-            from gpt_researcher.retrievers import MCPRetriever
-
-            return MCPRetriever
-        case "xquik":
-            from gpt_researcher.retrievers import XquikSearch
-
-            return XquikSearch
-
-        case _:
-            return None
+    module_name, class_name = export
+    try:
+        module = import_module(module_name)
+        return getattr(module, class_name)
+    except ImportError as exc:
+        raise ImportError(
+            f"Retriever `{retriever}` is not available in the slim install. "
+            "Use `tavily`, install the full requirements, or install the missing "
+            "optional package explicitly."
+        ) from exc
 
 
 def get_retrievers(headers: dict[str, str], cfg):
@@ -147,6 +121,4 @@ def get_default_retriever():
     Returns:
         The TavilySearch retriever class as the default search provider.
     """
-    from gpt_researcher.retrievers import TavilySearch
-
-    return TavilySearch
+    return get_retriever("tavily")

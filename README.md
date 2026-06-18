@@ -49,8 +49,8 @@ LLM-вызовы в этом wrapper из коробки рассчитаны н
 ```bash
 git clone https://github.com/mikemelanin/deep-research-codex.git
 cd deep-research-codex
-python3 -m venv .venv
-./.venv/bin/pip install -r gpt-researcher/requirements.txt boto3
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python -r requirements-slim.txt
 cp .env.example .env
 ```
 
@@ -61,6 +61,8 @@ cp .env.example .env
 - встроенный `gpt-researcher` уже включен в этот репозиторий, отдельно скачивать его не нужно
 - `.env` локальный и не публикуется в git
 - по умолчанию результат сохраняется в `~/Downloads`
+- `requirements-slim.txt` поддерживает основной локальный сценарий: Tavily + Bedrock + Markdown
+- если нужны PDF/DOCX, MCP, Ollama, LiteLLM, arxiv или обработка локальных документов, ставь полный набор: `uv pip install --python .venv/bin/python -r gpt-researcher/requirements.txt boto3`
 
 ## Установка как Codex skill
 

@@ -1,35 +1,38 @@
-from .arxiv.arxiv import ArxivSearch
-from .bing.bing import BingSearch
-from .custom.custom import CustomRetriever
-from .duckduckgo.duckduckgo import Duckduckgo
-from .google.google import GoogleSearch
-from .pubmed_central.pubmed_central import PubMedCentralSearch
-from .searx.searx import SearxSearch
-from .semantic_scholar.semantic_scholar import SemanticScholarSearch
-from .searchapi.searchapi import SearchApiSearch
-from .serpapi.serpapi import SerpApiSearch
-from .serper.serper import SerperSearch
-from .tavily.tavily_search import TavilySearch
-from .exa.exa import ExaSearch
-from .mcp import MCPRetriever
-from .bocha.bocha import BoChaSearch
-from .xquik.xquik import XquikSearch
+"""Lazy retriever exports.
 
-__all__ = [
-    "TavilySearch",
-    "CustomRetriever",
-    "Duckduckgo",
-    "SearchApiSearch",
-    "SerperSearch",
-    "SerpApiSearch",
-    "GoogleSearch",
-    "SearxSearch",
-    "BingSearch",
-    "ArxivSearch",
-    "SemanticScholarSearch",
-    "PubMedCentralSearch",
-    "ExaSearch",
-    "MCPRetriever",
-    "BoChaSearch",
-    "XquikSearch"
-]
+The local slim install only needs Tavily, but importing this package used to
+eagerly import every optional retriever and their heavy dependencies.
+"""
+
+_EXPORTS = {
+    "ArxivSearch": ".arxiv.arxiv",
+    "BingSearch": ".bing.bing",
+    "BoChaSearch": ".bocha.bocha",
+    "CustomRetriever": ".custom.custom",
+    "Duckduckgo": ".duckduckgo.duckduckgo",
+    "ExaSearch": ".exa.exa",
+    "GoogleSearch": ".google.google",
+    "MCPRetriever": ".mcp",
+    "PubMedCentralSearch": ".pubmed_central.pubmed_central",
+    "SearchApiSearch": ".searchapi.searchapi",
+    "SemanticScholarSearch": ".semantic_scholar.semantic_scholar",
+    "SerpApiSearch": ".serpapi.serpapi",
+    "SerperSearch": ".serper.serper",
+    "SearxSearch": ".searx.searx",
+    "TavilySearch": ".tavily.tavily_search",
+    "XquikSearch": ".xquik.xquik",
+}
+
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name):
+    if name not in _EXPORTS:
+        raise AttributeError(name)
+
+    from importlib import import_module
+
+    module = import_module(_EXPORTS[name], __name__)
+    value = getattr(module, name)
+    globals()[name] = value
+    return value

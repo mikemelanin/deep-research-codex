@@ -7,24 +7,12 @@ using various scraping backends (BeautifulSoup, PyMuPDF, Browser, etc.).
 import asyncio
 import importlib
 import logging
-import subprocess
-import sys
+from importlib import import_module
 
 import requests
-from colorama import Fore, init
+from colorama import Fore
 
 from gpt_researcher.utils.workers import WorkerPool
-
-from . import (
-    ArxivScraper,
-    BeautifulSoupScraper,
-    BrowserScraper,
-    FireCrawl,
-    NoDriverScraper,
-    PyMuPDFScraper,
-    TavilyExtract,
-    WebBaseLoaderScraper,
-)
 
 
 class Scraper:
@@ -90,20 +78,12 @@ class Scraper:
         pkg = pkg_map[scrapper_name]
         if not importlib.util.find_spec(pkg["import_name"]):
             pkg_inst_name = pkg["package_installation_name"]
-            init(autoreset=True)
-            print(Fore.YELLOW + f"{pkg_inst_name} not found. Attempting to install...")
-            try:
-                subprocess.check_call(
-                    [sys.executable, "-m", "pip", "install", pkg_inst_name]
-                )
-                importlib.invalidate_caches()
-                print(Fore.GREEN + f"{pkg_inst_name} installed successfully.")
-            except subprocess.CalledProcessError:
-                raise ImportError(
-                    Fore.RED
-                    + f"Unable to install {pkg_inst_name}. Please install manually with "
-                    f"`pip install -U {pkg_inst_name}`"
-                )
+            raise ImportError(
+                Fore.RED
+                + f"{pkg_inst_name} is not installed. The slim install only supports "
+                f"the default BeautifulSoup scraper; install the full requirements or "
+                f"run `pip install -U {pkg_inst_name}` to use `{scrapper_name}`."
+            )
 
     async def extract_data_from_url(self, link, session):
         """
@@ -185,16 +165,31 @@ class Scraper:
         `PyMuPDFScraper` class. If the link contains "arxiv.org", it selects the `ArxivScraper
         """
 
-        SCRAPER_CLASSES = {
-            "pdf": PyMuPDFScraper,
-            "arxiv": ArxivScraper,
-            "bs": BeautifulSoupScraper,
-            "web_base_loader": WebBaseLoaderScraper,
-            "browser": BrowserScraper,
-            "nodriver": NoDriverScraper,
-            "tavily_extract": TavilyExtract,
-            "firecrawl": FireCrawl,
-        }
+        def load_scraper(scraper_key):
+            exports = {
+                "pdf": (".pymupdf.pymupdf", "PyMuPDFScraper"),
+                "arxiv": (".arxiv.arxiv", "ArxivScraper"),
+                "bs": (".beautiful_soup.beautiful_soup", "BeautifulSoupScraper"),
+                "web_base_loader": (".web_base_loader.web_base_loader", "WebBaseLoaderScraper"),
+                "browser": (".browser.browser", "BrowserScraper"),
+                "nodriver": (".browser.nodriver_scraper", "NoDriverScraper"),
+                "tavily_extract": (".tavily_extract.tavily_extract", "TavilyExtract"),
+                "firecrawl": (".firecrawl.firecrawl", "FireCrawl"),
+            }
+            export = exports.get(scraper_key)
+            if export is None:
+                return None
+
+            module_name, class_name = export
+            try:
+                module = import_module(module_name, __package__)
+                return getattr(module, class_name)
+            except ImportError as exc:
+                raise ImportError(
+                    f"Scraper `{scraper_key}` is not available in the slim install. "
+                    "Use the default `bs` scraper, install the full requirements, "
+                    "or install the missing optional package explicitly."
+                ) from exc
 
         scraper_key = None
 
@@ -205,7 +200,7 @@ class Scraper:
         else:
             scraper_key = self.scraper
 
-        scraper_class = SCRAPER_CLASSES.get(scraper_key)
+        scraper_class = load_scraper(scraper_key)
         if scraper_class is None:
             raise Exception("Scraper not found.")
 

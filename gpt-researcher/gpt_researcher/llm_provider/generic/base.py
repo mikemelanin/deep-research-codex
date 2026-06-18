@@ -2,8 +2,6 @@ import aiofiles
 import asyncio
 import importlib
 import json
-import subprocess
-import sys
 import traceback
 from typing import Any
 from colorama import Fore, Style, init
@@ -366,19 +364,10 @@ class GenericLLMProvider:
 def _check_pkg(pkg: str) -> None:
     if not importlib.util.find_spec(pkg):
         pkg_kebab = pkg.replace("_", "-")
-        # Import colorama and initialize it
         init(autoreset=True)
-
-        try:
-            print(f"{Fore.YELLOW}Installing {pkg_kebab}...{Style.RESET_ALL}")
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "-U", pkg_kebab])
-            print(f"{Fore.GREEN}Successfully installed {pkg_kebab}{Style.RESET_ALL}")
-
-            # Try importing again after install
-            importlib.import_module(pkg)
-
-        except subprocess.CalledProcessError:
-            raise ImportError(
-                Fore.RED + f"Failed to install {pkg_kebab}. Please install manually with "
-                f"`pip install -U {pkg_kebab}`"
-            )
+        raise ImportError(
+            Fore.RED
+            + f"{pkg_kebab} is not installed. The slim install supports the configured "
+            f"Bedrock workflow only; install the full requirements or run "
+            f"`pip install -U {pkg_kebab}` to use this provider."
+        )
