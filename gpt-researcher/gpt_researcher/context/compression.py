@@ -16,7 +16,7 @@ Classes:
 
 import asyncio
 import os
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from langchain_classic.retrievers import ContextualCompressionRetriever
 from langchain_classic.retrievers.document_compressors import (
@@ -29,8 +29,10 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from ..memory.embeddings import OPENAI_EMBEDDING_MODEL
 from ..prompts import PromptFamily
 from ..utils.costs import estimate_embedding_cost
-from ..vector_store import VectorStoreWrapper
 from .retriever import SearchAPIRetriever, SectionRetriever
+
+if TYPE_CHECKING:
+    from ..vector_store import VectorStoreWrapper
 
 
 class VectorstoreCompressor:
@@ -47,7 +49,7 @@ class VectorstoreCompressor:
 
     def __init__(
         self,
-        vector_store: VectorStoreWrapper,
+        vector_store: "VectorStoreWrapper",
         max_results: int = 7,
         filter: Optional[dict] = None,
         prompt_family: type[PromptFamily] | PromptFamily = PromptFamily,
