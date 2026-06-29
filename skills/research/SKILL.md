@@ -57,7 +57,11 @@ For Codex runs, use the controlled two-step flow:
 ./research.sh --from-prefilter "<artifact-path>"
 ```
 
-If the user asks for Russian output, add `--ru` to both commands.
+Language contract:
+
+- Default final report language is English.
+- Do not infer Russian output from the user's message language.
+- Add `--ru` to both commands only when the user explicitly asks for Russian output, for example "на русском", "по-русски", or "русский отчет".
 
 ## File Input
 
@@ -87,7 +91,7 @@ On success, report the final saved markdown path from script output:
 
 - `Saved report: ...`
 
-Default output is English. Russian output is produced only when `--ru` is used.
+Default output is English, including when the input request is written in Russian. Russian output is produced only when `--ru` is used.
 
 ## Error Mapping
 

@@ -16,6 +16,7 @@ LOCK_META_FILE="$ROOT_DIR/.research.lock.meta"
 print_usage() {
   echo "Usage: ./research.sh [--ru] [--yes|--no-confirm|--confirm] [--prefilter-only] [--from-prefilter /path/prefilter.json] [--file /path/input.txt|.md] \"/path/notes.md\" | \"topic or raw dump\""
   echo "Default: deep research with an English final report. Use `--ru` to translate the final report to Russian."
+  echo "Input language does not change output language: Russian prompts still produce English reports unless `--ru` is set."
   echo "Legacy compatibility: `--deep`, `--en`, and `--no-translate` are still accepted."
 }
 
