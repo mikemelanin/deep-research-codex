@@ -12,8 +12,9 @@ Use this skill to run research reports through Deep Research Codex.
 Find the project root in this order:
 
 1. `DEEP_RESEARCH_CODEX_HOME` environment variable
-2. current workspace if it contains `research.sh`
-3. `~/deep-research-codex`
+2. `/Users/melanin/Vibecoding/projects/deep-research-codex`
+3. current workspace if it contains `research.sh`
+4. `~/deep-research-codex`
 
 The project root must contain:
 
@@ -21,6 +22,19 @@ The project root must contain:
 - `scripts/`
 - `gpt-researcher/`
 - `.env`
+
+Always run commands from the resolved project root:
+
+```bash
+PROJECT_ROOT="${DEEP_RESEARCH_CODEX_HOME:-/Users/melanin/Vibecoding/projects/deep-research-codex}"
+if [[ ! -f "$PROJECT_ROOT/research.sh" && -f "$PWD/research.sh" ]]; then
+  PROJECT_ROOT="$PWD"
+fi
+cd "$PROJECT_ROOT"
+./research.sh ...
+```
+
+Do not run `./research.sh` from the user's current workspace unless that workspace is the resolved project root.
 
 ## When to Use
 
@@ -40,6 +54,7 @@ For Codex runs, use the controlled two-step flow:
 1. Run prefilter only:
 
 ```bash
+cd "$PROJECT_ROOT"
 ./research.sh --prefilter-only "<topic>"
 ```
 
@@ -54,6 +69,7 @@ For Codex runs, use the controlled two-step flow:
 5. If the user approves, continue from the saved artifact:
 
 ```bash
+cd "$PROJECT_ROOT"
 ./research.sh --from-prefilter "<artifact-path>"
 ```
 
@@ -68,6 +84,7 @@ Language contract:
 If the user gives a markdown file, pass it as file input:
 
 ```bash
+cd "$PROJECT_ROOT"
 ./research.sh --prefilter-only --file "/absolute/path/to/context.md"
 ```
 
@@ -80,6 +97,7 @@ Markdown files are treated as request input, not as a local knowledge base.
 Use direct mode only when the user clearly wants one-shot execution:
 
 ```bash
+cd "$PROJECT_ROOT"
 ./research.sh "<topic>"
 ./research.sh --ru "<topic>"
 ./research.sh --yes "<topic>"

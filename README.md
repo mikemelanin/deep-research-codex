@@ -83,6 +83,14 @@ cp -R skills/research ~/.codex/skills/research
 export DEEP_RESEARCH_CODEX_HOME="/path/to/deep-research-codex"
 ```
 
+На этой машине установленный путь:
+
+```bash
+export DEEP_RESEARCH_CODEX_HOME="/Users/melanin/Vibecoding/projects/deep-research-codex"
+```
+
+Skill должен работать из любой текущей папки: сначала находит `DEEP_RESEARCH_CODEX_HOME` или установленный локальный checkout, затем делает `cd` в корень `deep-research-codex` и только после этого запускает `./research.sh`. Не нужно копировать `research.sh` в рабочие папки вроде `sandbox`.
+
 После этого в Codex можно просить обычным языком:
 
 ```text
